@@ -224,7 +224,7 @@ The domain models the lifecycle of internal payment requests within a single org
 | PaymentRequest has SOAVersions | 1:N | One PaymentRequest may have zero or more SOAVersions. Each SOAVersion belongs to exactly one PaymentRequest. |
 | User uploads SOAVersion | 1:N | One User may upload many SOAVersions. Each SOAVersion references exactly one uploader. |
 | AuditLog references User | N:1 | Many AuditLog entries may reference one User as actor. AuditLog entries may have null actor. |
-| AuditLog references Entity | N:1 | Many AuditLog entries may reference one entity (PaymentBatch, PaymentRequest, etc.) by type and identifier. |
+| AuditLog references Entity | N:1 | Many AuditLog entries may reference one entity (PaymentBatch, PaymentRequest, ApprovalRecord, SOAVersion) by type and identifier. |
 
 ---
 
