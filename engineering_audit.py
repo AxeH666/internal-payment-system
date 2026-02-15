@@ -15,6 +15,7 @@ ARCH_TAG = "v0.1.0-arch-freeze"
 # Utility
 # ======================================================
 
+
 def run(cmd):
     result = subprocess.run(cmd, capture_output=True, text=True)
     return result.stdout.strip(), result.stderr.strip(), result.returncode
@@ -48,6 +49,7 @@ def should_scan(path: Path):
 # ======================================================
 # Git Checks
 # ======================================================
+
 
 def check_git_repo():
     if not (ROOT / ".git").exists():
@@ -88,6 +90,7 @@ def check_clean_working_tree():
 # Documentation
 # ======================================================
 
+
 def check_docs():
     required = [
         "01_PRD.md",
@@ -120,6 +123,7 @@ def check_docs():
 # Backend Checks
 # ======================================================
 
+
 def scan_backend_for_raw_save():
     if not BACKEND.exists():
         warn("Backend folder not yet initialized")
@@ -133,8 +137,19 @@ def scan_backend_for_raw_save():
 
         try:
             content = pyfile.read_text(errors="ignore")
-            if ".save(" in content and "service" not in str(pyfile):
+            # Flag direct instance `.save(` usage outside service layer.
+            # Structural model overrides legitimately call `super().save(...)` and
+            # must not be flagged.
+            if "service" in str(pyfile):
+                continue
+
+            for line in content.splitlines():
+                if ".save(" not in line:
+                    continue
+                if "super().save(" in line:
+                    continue
                 issues.append(str(pyfile))
+                break
         except Exception:
             continue
 
@@ -188,7 +203,10 @@ def scan_for_atomic_usage():
             continue
 
     if not atomic_found:
-        warn("No transaction.atomic usage detected (expected after service layer implemented)")
+        warn(
+            "No transaction.atomic usage detected "
+            "(expected after service layer implemented)"
+        )
     else:
         ok("Atomic transaction usage detected")
 
@@ -198,6 +216,7 @@ def scan_for_atomic_usage():
 # ======================================================
 # Frontend Check
 # ======================================================
+
 
 def scan_frontend_for_state_logic():
     if not FRONTEND.exists():
@@ -228,6 +247,7 @@ def scan_frontend_for_state_logic():
 # Docker
 # ======================================================
 
+
 def check_docker():
     if not (ROOT / "docker-compose.yml").exists():
         warn("docker-compose.yml missing")
@@ -239,6 +259,7 @@ def check_docker():
 # ======================================================
 # MAIN
 # ======================================================
+
 
 def main():
     print("\n=== ENGINEERING SYSTEM AUDIT ===\n")
