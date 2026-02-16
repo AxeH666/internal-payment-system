@@ -6,8 +6,8 @@ import { handleErrorResponse } from '../utils/errorHandler'
 /**
  * R2: Home Screen
  * Route: /
- * Allowed roles: CREATOR, APPROVER, VIEWER
- * Redirects: CREATOR/VIEWER to /batches; APPROVER to /requests
+ * Allowed roles: CREATOR, APPROVER, VIEWER, ADMIN
+ * Redirects: CREATOR/VIEWER/ADMIN to /batches; APPROVER to /requests
  */
 const Home = () => {
   const navigate = useNavigate()

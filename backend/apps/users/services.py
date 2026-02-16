@@ -58,7 +58,7 @@ def create_superuser(
     Note: In this codebase, role 'CREATOR' is treated as staff/superuser
     for Django admin compatibility (no schema changes introduced here).
     """
-    extra_fields.setdefault("role", "CREATOR")
+    extra_fields.setdefault("role", "ADMIN")
     return create_user(
         user_model=user_model,
         username=username,
@@ -70,21 +70,21 @@ def create_superuser(
 
 def user_is_staff(*, user: Any) -> bool:
     """Django admin compatibility predicate."""
-    return user.role == "CREATOR"
+    return user.role in ("CREATOR", "ADMIN")
 
 
 def user_is_superuser(*, user: Any) -> bool:
     """Django admin compatibility predicate."""
-    return user.role == "CREATOR"
+    return user.role in ("CREATOR", "ADMIN")
 
 
 def user_has_perm(*, user: Any, perm: str, obj: Any = None) -> bool:
     """Django admin compatibility predicate."""
     _ = (perm, obj)
-    return user.role == "CREATOR"
+    return user.role in ("CREATOR", "ADMIN")
 
 
 def user_has_module_perms(*, user: Any, app_label: str) -> bool:
     """Django admin compatibility predicate."""
     _ = app_label
-    return user.role == "CREATOR"
+    return user.role in ("CREATOR", "ADMIN")

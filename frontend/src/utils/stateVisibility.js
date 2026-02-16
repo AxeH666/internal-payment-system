@@ -10,9 +10,11 @@
  */
 export const getBatchActionVisibility = (batch, currentUser) => {
   const isCreator = currentUser?.role === 'CREATOR'
+  const isAdmin = currentUser?.role === 'ADMIN'
   const isBatchCreator = batch?.createdBy === currentUser?.id
   const isDraft = batch?.status === 'DRAFT'
   const isClosed = batch?.status === 'COMPLETED' || batch?.status === 'CANCELLED'
+  const canActAsCreator = (isCreator && isBatchCreator) || isAdmin
 
   // CLOSED batch rule: all mutation actions disabled
   if (isClosed) {
@@ -23,8 +25,8 @@ export const getBatchActionVisibility = (batch, currentUser) => {
     }
   }
 
-  // DRAFT state: buttons visible only to CREATOR who is batch creator
-  if (isDraft && isCreator && isBatchCreator) {
+  // DRAFT state: buttons visible to CREATOR (batch creator) or ADMIN
+  if (isDraft && canActAsCreator) {
     return {
       submitButton: true,
       cancelButton: true,
@@ -46,9 +48,12 @@ export const getBatchActionVisibility = (batch, currentUser) => {
 export const getRequestActionVisibility = (request, batch, currentUser) => {
   const isCreator = currentUser?.role === 'CREATOR'
   const isApprover = currentUser?.role === 'APPROVER'
+  const isAdmin = currentUser?.role === 'ADMIN'
   const isBatchCreator = batch?.createdBy === currentUser?.id
   const isClosed = batch?.status === 'COMPLETED' || batch?.status === 'CANCELLED'
   const requestStatus = request?.status
+  const canActAsCreator = (isCreator && isBatchCreator) || isAdmin
+  const canActAsApprover = isApprover || isAdmin
 
   // CLOSED batch rule: all mutation actions disabled
   if (isClosed) {
@@ -84,7 +89,7 @@ export const getRequestActionVisibility = (request, batch, currentUser) => {
   }
 
   // DRAFT state
-  if (requestStatus === 'DRAFT' && isCreator && isBatchCreator) {
+  if (requestStatus === 'DRAFT' && canActAsCreator) {
     return {
       editButton: true,
       uploadSoaButton: true,
@@ -95,7 +100,7 @@ export const getRequestActionVisibility = (request, batch, currentUser) => {
   }
 
   // PENDING_APPROVAL state
-  if (requestStatus === 'PENDING_APPROVAL' && isApprover) {
+  if (requestStatus === 'PENDING_APPROVAL' && canActAsApprover) {
     return {
       editButton: false,
       uploadSoaButton: false,
@@ -106,7 +111,7 @@ export const getRequestActionVisibility = (request, batch, currentUser) => {
   }
 
   // APPROVED state
-  if (requestStatus === 'APPROVED' && (isCreator || isApprover)) {
+  if (requestStatus === 'APPROVED' && (isCreator || isApprover || isAdmin)) {
     return {
       editButton: false,
       uploadSoaButton: false,
@@ -141,9 +146,11 @@ export const getRequestActionVisibility = (request, batch, currentUser) => {
  */
 export const getRequestApprovalQueueVisibility = (request, currentUser) => {
   const isApprover = currentUser?.role === 'APPROVER'
+  const isAdmin = currentUser?.role === 'ADMIN'
+  const canApprove = isApprover || isAdmin
   const requestStatus = request?.status
 
-  if (!isApprover) {
+  if (!canApprove) {
     return {
       approveButton: false,
       rejectButton: false,

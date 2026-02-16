@@ -216,8 +216,8 @@ def main() -> None:
 
     print("\n===== PHASE 1 FULL CERTIFICATION =====")
 
-    run("python docs_check.py", "Governance Docs Check")
-    run("python engineering_audit.py", "Engineering Audit")
+    run(f"{sys.executable} docs_check.py", "Governance Docs Check")
+    run(f"{sys.executable} engineering_audit.py", "Engineering Audit")
     if not args.skip_docker_tests:
         run("docker build ./backend", "Docker Build Validation")
         run(

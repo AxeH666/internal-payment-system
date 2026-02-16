@@ -117,7 +117,7 @@ def add_request(
         raise NotFoundError(f"User {creator_id} does not exist")
 
     # Check ownership
-    if batch.created_by_id != creator_id:
+    if creator.role != "ADMIN" and batch.created_by_id != creator_id:
         raise PermissionDeniedError("Only the batch creator can add requests")
 
     # Check batch state
@@ -213,7 +213,7 @@ def update_request(request_id, batch_id, creator_id, **fields):
         raise NotFoundError(f"User {creator_id} does not exist")
 
     # Check ownership
-    if request.batch.created_by_id != creator_id:
+    if creator.role != "ADMIN" and request.batch.created_by_id != creator_id:
         raise PermissionDeniedError("Only the batch creator can update requests")
 
     # Check request state
@@ -318,7 +318,7 @@ def submit_batch(batch_id, creator_id):
         raise NotFoundError(f"User {creator_id} does not exist")
 
     # Check ownership
-    if batch.created_by_id != creator_id:
+    if creator.role != "ADMIN" and batch.created_by_id != creator_id:
         raise PermissionDeniedError("Only the batch creator can submit the batch")
 
     # Check batch state
@@ -449,7 +449,7 @@ def cancel_batch(batch_id, creator_id):
     creator.pk
 
     # Check ownership
-    if batch.created_by_id != creator_id:
+    if creator.role != "ADMIN" and batch.created_by_id != creator_id:
         raise PermissionDeniedError("Only the batch creator can cancel the batch")
 
     # Check batch state
@@ -760,7 +760,7 @@ def upload_soa(batch_id, request_id, creator_id, file):
         raise NotFoundError(f"User {creator_id} does not exist")
 
     # Check ownership
-    if request.batch.created_by_id != creator_id:
+    if creator.role != "ADMIN" and request.batch.created_by_id != creator_id:
         raise PermissionDeniedError("Only the batch creator can upload SOA")
 
     # Check request state

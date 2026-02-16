@@ -84,7 +84,7 @@ const BatchesList = () => {
       )}
 
       <div style={{ marginBottom: '20px' }}>
-        {user?.role === 'CREATOR' && (
+        {(user?.role === 'CREATOR' || user?.role === 'ADMIN') && (
           <Link to="/batches/new" style={{ display: 'inline-block', padding: '10px 20px', backgroundColor: '#007bff', color: 'white', textDecoration: 'none', borderRadius: '4px', marginRight: '10px' }}>
             Create Batch
           </Link>
@@ -106,7 +106,7 @@ const BatchesList = () => {
       {batches.length === 0 ? (
         <div style={{ padding: '40px', textAlign: 'center', backgroundColor: 'white', borderRadius: '4px' }}>
           <p>No batches yet.</p>
-          {user?.role === 'CREATOR' && (
+          {(user?.role === 'CREATOR' || user?.role === 'ADMIN') && (
             <Link to="/batches/new" style={{ display: 'inline-block', marginTop: '15px', padding: '10px 20px', backgroundColor: '#007bff', color: 'white', textDecoration: 'none', borderRadius: '4px' }}>
               Create Batch
             </Link>

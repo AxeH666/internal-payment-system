@@ -2,7 +2,7 @@
 User model for the Internal Payment Workflow System.
 
 Fields: id (UUID), username, display_name, role, password, created_at, updated_at.
-Username unique. Role choices CREATOR, APPROVER, VIEWER.
+Username unique. Role choices CREATOR, APPROVER, VIEWER, ADMIN.
 """
 
 import uuid
@@ -46,6 +46,7 @@ class User(AbstractBaseUser):
         ("CREATOR", "Creator"),
         ("APPROVER", "Approver"),
         ("VIEWER", "Viewer"),
+        ("ADMIN", "Admin"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -76,7 +77,7 @@ class User(AbstractBaseUser):
         db_table = "users"
         constraints = [
             models.CheckConstraint(
-                check=models.Q(role__in=["CREATOR", "APPROVER", "VIEWER"]),
+                check=models.Q(role__in=["CREATOR", "APPROVER", "VIEWER", "ADMIN"]),
                 name="valid_role",
             )
         ]

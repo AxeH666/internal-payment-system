@@ -32,7 +32,7 @@ function App() {
         path="/batches"
         element={
           <ProtectedRoute>
-            <RoleBasedRoute allowedRoles={['CREATOR', 'APPROVER', 'VIEWER']}>
+            <RoleBasedRoute allowedRoles={['CREATOR', 'APPROVER', 'VIEWER', 'ADMIN']}>
               <BatchesList />
             </RoleBasedRoute>
           </ProtectedRoute>
@@ -44,7 +44,7 @@ function App() {
         path="/batches/new"
         element={
           <ProtectedRoute>
-            <RoleBasedRoute allowedRoles={['CREATOR']}>
+            <RoleBasedRoute allowedRoles={['CREATOR', 'ADMIN']}>
               <CreateBatch />
             </RoleBasedRoute>
           </ProtectedRoute>
@@ -56,7 +56,7 @@ function App() {
         path="/batches/:batchId"
         element={
           <ProtectedRoute>
-            <RoleBasedRoute allowedRoles={['CREATOR', 'APPROVER', 'VIEWER']}>
+            <RoleBasedRoute allowedRoles={['CREATOR', 'APPROVER', 'VIEWER', 'ADMIN']}>
               <BatchDetail />
             </RoleBasedRoute>
           </ProtectedRoute>
@@ -68,7 +68,7 @@ function App() {
         path="/batches/:batchId/requests/:requestId"
         element={
           <ProtectedRoute>
-            <RoleBasedRoute allowedRoles={['CREATOR', 'APPROVER', 'VIEWER']}>
+            <RoleBasedRoute allowedRoles={['CREATOR', 'APPROVER', 'VIEWER', 'ADMIN']}>
               <RequestDetail />
             </RoleBasedRoute>
           </ProtectedRoute>
@@ -80,7 +80,7 @@ function App() {
         path="/requests"
         element={
           <ProtectedRoute>
-            <RoleBasedRoute allowedRoles={['APPROVER']}>
+            <RoleBasedRoute allowedRoles={['APPROVER', 'ADMIN']}>
               <PendingRequestsList />
             </RoleBasedRoute>
           </ProtectedRoute>
@@ -92,7 +92,7 @@ function App() {
         path="/requests/:requestId"
         element={
           <ProtectedRoute>
-            <RoleBasedRoute allowedRoles={['APPROVER']}>
+            <RoleBasedRoute allowedRoles={['APPROVER', 'ADMIN']}>
               <RequestDetailApprovalQueue />
             </RoleBasedRoute>
           </ProtectedRoute>
@@ -104,7 +104,7 @@ function App() {
         path="/audit"
         element={
           <ProtectedRoute>
-            <RoleBasedRoute allowedRoles={['CREATOR', 'APPROVER', 'VIEWER']}>
+            <RoleBasedRoute allowedRoles={['CREATOR', 'APPROVER', 'VIEWER', 'ADMIN']}>
               <AuditLog />
             </RoleBasedRoute>
           </ProtectedRoute>

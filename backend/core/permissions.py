@@ -9,7 +9,7 @@ from rest_framework import permissions
 
 
 class IsCreator(permissions.BasePermission):
-    """Allow CREATOR role only."""
+    """Allow CREATOR or ADMIN role."""
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
@@ -18,14 +18,14 @@ class IsCreator(permissions.BasePermission):
         if not hasattr(request.user, "role"):
             return False
 
-        if request.user.role == "CREATOR":
+        if request.user.role in ("CREATOR", "ADMIN"):
             return True
 
         return False
 
 
 class IsApprover(permissions.BasePermission):
-    """Allow APPROVER role only."""
+    """Allow APPROVER or ADMIN role."""
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
@@ -34,14 +34,14 @@ class IsApprover(permissions.BasePermission):
         if not hasattr(request.user, "role"):
             return False
 
-        if request.user.role == "APPROVER":
+        if request.user.role in ("APPROVER", "ADMIN"):
             return True
 
         return False
 
 
 class IsCreatorOrApprover(permissions.BasePermission):
-    """Allow CREATOR or APPROVER roles."""
+    """Allow CREATOR, APPROVER, or ADMIN roles."""
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
@@ -50,14 +50,14 @@ class IsCreatorOrApprover(permissions.BasePermission):
         if not hasattr(request.user, "role"):
             return False
 
-        if request.user.role in ("CREATOR", "APPROVER"):
+        if request.user.role in ("CREATOR", "APPROVER", "ADMIN"):
             return True
 
         return False
 
 
 class IsAuthenticatedReadOnly(permissions.BasePermission):
-    """Allow CREATOR, APPROVER, VIEWER for GET requests."""
+    """Allow CREATOR, APPROVER, VIEWER, ADMIN for GET requests."""
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
@@ -68,7 +68,7 @@ class IsAuthenticatedReadOnly(permissions.BasePermission):
 
         # Allow all authenticated users with valid roles for GET
         if request.method == "GET":
-            if request.user.role in ("CREATOR", "APPROVER", "VIEWER"):
+            if request.user.role in ("CREATOR", "APPROVER", "VIEWER", "ADMIN"):
                 return True
 
         return False
