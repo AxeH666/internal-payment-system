@@ -45,8 +45,8 @@
 ## Verify Installation
 
 ```bash
-# Check health
-curl http://localhost:8000/health/
+# Check health (endpoint: /api/health/)
+curl http://localhost:8000/api/health/
 
 # Check logs
 docker-compose logs backend

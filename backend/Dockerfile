@@ -25,7 +25,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project
 COPY . .
 
-# Ensure startup helper is executable
+# Copy and ensure startup helper is executable
+COPY wait-for-postgres.sh /app/wait-for-postgres.sh
 RUN chmod +x /app/wait-for-postgres.sh
 
 # Create directories for media and static files
@@ -39,5 +40,6 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Default command (can be overridden in docker-compose)
-CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "120"]
+# Startup chain: wait for DB -> migrate -> gunicorn
+ENTRYPOINT ["/app/wait-for-postgres.sh"]
+CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--config", "gunicorn.conf.py"]
