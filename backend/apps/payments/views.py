@@ -646,6 +646,19 @@ def download_soa_document(request, batchId, requestId, versionId):
 
     try:
         file = default_storage.open(soa_version.document_reference, "rb")
+        from apps.audit.services import create_audit_entry
+
+        create_audit_entry(
+            event_type="SOA_DOWNLOADED",
+            actor_id=request.user.id if request.user.is_authenticated else None,
+            entity_type="SOAVersion",
+            entity_id=soa_version.id,
+            previous_state=None,
+            new_state={
+                "version_number": soa_version.version_number,
+                "source": soa_version.source,
+            },
+        )
         return FileResponse(
             file, as_attachment=True, filename=f"soa_v{soa_version.version_number}.pdf"
         )

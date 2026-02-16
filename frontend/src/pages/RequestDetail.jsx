@@ -354,7 +354,14 @@ const RequestDetail = () => {
                 }}
               >
                 <div style={{ fontWeight: 'bold', marginBottom: '6px' }}>
-                  Version {soa.versionNumber} — {soa.changeSummary || `Uploaded ${new Date(soa.uploadedAt).toLocaleString()}`}
+                  Version {soa.versionNumber}
+                  {soa.source === 'GENERATED' && (
+                    <span style={{ marginLeft: '8px', fontSize: '12px', color: '#6c757d', backgroundColor: '#e9ecef', padding: '2px 6px', borderRadius: '4px' }}>
+                      Auto-generated
+                    </span>
+                  )}
+                  {' — '}
+                  {soa.changeSummary || `Uploaded ${new Date(soa.uploadedAt).toLocaleString()}`}
                 </div>
                 {soa.downloadUrl && (
                   <a

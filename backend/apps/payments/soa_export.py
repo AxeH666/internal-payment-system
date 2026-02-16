@@ -138,11 +138,16 @@ def export_batch_soa_pdf(batch_id):
         if soas:
             soa_rows = [["Version", "Uploaded At", "Uploaded By"]]
             for soa in soas:
+                uploader = (
+                    (soa.uploaded_by.display_name or soa.uploaded_by.username)
+                    if soa.uploaded_by
+                    else "System"
+                )
                 soa_rows.append(
                     [
                         str(soa.version_number),
                         soa.uploaded_at.strftime("%Y-%m-%d %H:%M"),
-                        soa.uploaded_by.display_name or soa.uploaded_by.username,
+                        uploader,
                     ]
                 )
             soa_table = Table(soa_rows, colWidths=[1 * inch, 2 * inch, 2 * inch])
@@ -261,11 +266,12 @@ def export_batch_soa_excel(batch_id):
                 ws.cell(
                     row=row, column=7, value=soa.uploaded_at.strftime("%Y-%m-%d %H:%M")
                 )
-                ws.cell(
-                    row=row,
-                    column=8,
-                    value=soa.uploaded_by.display_name or soa.uploaded_by.username,
+                uploader = (
+                    (soa.uploaded_by.display_name or soa.uploaded_by.username)
+                    if soa.uploaded_by
+                    else "System"
                 )
+                ws.cell(row=row, column=8, value=uploader)
                 for col in range(1, 9):
                     ws.cell(row=row, column=col).border = thin_border
                 row += 1

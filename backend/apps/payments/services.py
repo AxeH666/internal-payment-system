@@ -704,7 +704,7 @@ def mark_paid(request_id, actor_id):
                 batch.save()
 
                 create_audit_entry(
-                    event_type="BATCH_SUBMITTED",  # Using existing event type
+                    event_type="BATCH_COMPLETED",
                     actor_id=None,  # System transition
                     entity_type="PaymentBatch",
                     entity_id=batch.id,
@@ -714,6 +714,9 @@ def mark_paid(request_id, actor_id):
                         "completed_at": batch.completed_at.isoformat(),
                     },
                 )
+
+                # Auto-generate SOA when batch completes (original canonical flow)
+                generate_soa_for_batch(batch.id)
 
         return request
 
@@ -787,11 +790,12 @@ def upload_soa(batch_id, request_id, creator_id, file):
         file_name = f"soa/{request_id}/{next_version}_{file.name}"
         file_path = default_storage.save(file_name, ContentFile(file.read()))
 
-        # Create SOAVersion
+        # Create SOAVersion (user upload)
         soa_version = SOAVersion.objects.create(
             payment_request=request,
             version_number=next_version,
             document_reference=file_path,
+            source=SOAVersion.SOURCE_UPLOAD,
             uploaded_by=creator,
         )
 
@@ -806,3 +810,78 @@ def upload_soa(batch_id, request_id, creator_id, file):
         )
 
         return soa_version
+
+
+def generate_soa_for_batch(batch_id):
+    """
+    Auto-generate SOA when batch reaches COMPLETED.
+    System creates SOA document; no manual step.
+    Audit: SOA_GENERATED (actor=None for system event).
+
+    Idempotent: skips if batch already has generated SOA.
+
+    Args:
+        batch_id: PaymentBatch identifier
+
+    Returns:
+        list[SOAVersion]: Created SOA versions (one per request), or empty if skipped
+    """
+    from django.core.files.base import ContentFile
+    from django.core.files.storage import default_storage
+
+    from apps.payments.soa_export import export_batch_soa_pdf
+
+    try:
+        batch = PaymentBatch.objects.get(id=batch_id)
+    except PaymentBatch.DoesNotExist:
+        return []
+
+    # Idempotency: skip if already generated
+    has_generated = SOAVersion.objects.filter(
+        payment_request__batch_id=batch_id,
+        source=SOAVersion.SOURCE_GENERATED,
+    ).exists()
+    if has_generated:
+        return []
+
+    # Generate PDF
+    content, filename = export_batch_soa_pdf(batch_id)
+
+    # Store file (single file for batch, referenced by each request)
+    file_path = f"soa/generated/{batch_id}/batch_soa.pdf"
+    default_storage.save(file_path, ContentFile(content))
+
+    created = []
+    with transaction.atomic():
+        for request in batch.requests.all():
+            # Next version for this request
+            existing = SOAVersion.objects.filter(payment_request=request).order_by(
+                "-version_number"
+            )
+            next_version = (
+                existing.first().version_number + 1 if existing.exists() else 1
+            )
+
+            soa_version = SOAVersion.objects.create(
+                payment_request=request,
+                version_number=next_version,
+                document_reference=file_path,
+                source=SOAVersion.SOURCE_GENERATED,
+                uploaded_by=None,  # System-generated
+            )
+            created.append(soa_version)
+
+        # Audit: SOA_GENERATED (system event, no actor)
+        create_audit_entry(
+            event_type="SOA_GENERATED",
+            actor_id=None,
+            entity_type="PaymentBatch",
+            entity_id=batch.id,
+            previous_state=None,
+            new_state={
+                "batch_id": str(batch_id),
+                "soa_versions_created": len(created),
+            },
+        )
+
+    return created

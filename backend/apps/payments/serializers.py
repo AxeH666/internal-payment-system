@@ -79,14 +79,17 @@ class PaymentRequestDetailSerializer(PaymentRequestSerializer):
         soas = obj.soa_versions.select_related("uploaded_by").order_by("version_number")
         result = []
         for soa in soas:
+            uploader = (
+                (soa.uploaded_by.display_name or soa.uploaded_by.username)
+                if soa.uploaded_by
+                else "System"
+            )
             if soa.version_number == 1:
-                uploader = soa.uploaded_by.display_name or soa.uploaded_by.username
                 change_summary = (
                     f"Initial upload by {uploader} "
                     f"on {soa.uploaded_at.strftime('%Y-%m-%d %H:%M')}"
                 )
             else:
-                uploader = soa.uploaded_by.display_name or soa.uploaded_by.username
                 prev_v = soa.version_number - 1
                 change_summary = (
                     f"Version {soa.version_number} - Replaces v{prev_v}, "
@@ -98,9 +101,11 @@ class PaymentRequestDetailSerializer(PaymentRequestSerializer):
                     "id": str(soa.id),
                     "versionNumber": soa.version_number,
                     "uploadedAt": soa.uploaded_at.isoformat(),
-                    "uploadedBy": str(soa.uploaded_by_id),
-                    "uploadedByName": soa.uploaded_by.display_name
-                    or soa.uploaded_by.username,
+                    "uploadedBy": (
+                        str(soa.uploaded_by_id) if soa.uploaded_by_id else None
+                    ),
+                    "uploadedByName": uploader,
+                    "source": soa.source,
                     "changeSummary": change_summary,
                     "downloadUrl": (
                         f"/api/v1/batches/{obj.batch_id}/requests/{obj.id}/"
@@ -236,7 +241,9 @@ class SOAVersionSerializer(serializers.ModelSerializer):
         source="document_reference", read_only=True
     )
     uploadedAt = serializers.DateTimeField(source="uploaded_at", read_only=True)
-    uploadedBy = serializers.UUIDField(source="uploaded_by_id", read_only=True)
+    uploadedBy = serializers.UUIDField(
+        source="uploaded_by_id", read_only=True, allow_null=True
+    )
 
     class Meta:
         model = SOAVersion
@@ -245,6 +252,7 @@ class SOAVersionSerializer(serializers.ModelSerializer):
             "requestId",
             "versionNumber",
             "documentReference",
+            "source",
             "uploadedAt",
             "uploadedBy",
         ]

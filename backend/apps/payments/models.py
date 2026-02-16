@@ -173,15 +173,31 @@ class ApprovalRecord(models.Model):
 class SOAVersion(models.Model):
     """SOAVersion model - versioned snapshot of Statement of Account document."""
 
+    SOURCE_UPLOAD = "UPLOAD"
+    SOURCE_GENERATED = "GENERATED"
+    SOURCE_CHOICES = [
+        (SOURCE_UPLOAD, "Upload"),
+        (SOURCE_GENERATED, "Generated"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     payment_request = models.ForeignKey(
         PaymentRequest, on_delete=models.PROTECT, related_name="soa_versions"
     )
     version_number = models.PositiveIntegerField()
     document_reference = models.CharField(max_length=512)  # Storage path or identifier
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_UPLOAD,
+    )
     uploaded_at = models.DateTimeField(auto_now_add=True)
     uploaded_by = models.ForeignKey(
-        "users.User", on_delete=models.PROTECT, related_name="uploaded_soas"
+        "users.User",
+        on_delete=models.PROTECT,
+        related_name="uploaded_soas",
+        null=True,
+        blank=True,
     )
 
     class Meta:
