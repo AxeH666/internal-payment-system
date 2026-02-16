@@ -75,17 +75,40 @@ class PaymentRequestDetailSerializer(PaymentRequestSerializer):
         return None
 
     def get_soaVersions(self, obj):
-        """Get SOA versions."""
-        soas = obj.soa_versions.all().order_by("version_number")
-        return [
-            {
-                "id": str(soa.id),
-                "versionNumber": soa.version_number,
-                "uploadedAt": soa.uploaded_at.isoformat(),
-                "uploadedBy": str(soa.uploaded_by_id),
-            }
-            for soa in soas
-        ]
+        """Get SOA versions with change summary (version header)."""
+        soas = obj.soa_versions.select_related("uploaded_by").order_by("version_number")
+        result = []
+        for soa in soas:
+            if soa.version_number == 1:
+                uploader = soa.uploaded_by.display_name or soa.uploaded_by.username
+                change_summary = (
+                    f"Initial upload by {uploader} "
+                    f"on {soa.uploaded_at.strftime('%Y-%m-%d %H:%M')}"
+                )
+            else:
+                uploader = soa.uploaded_by.display_name or soa.uploaded_by.username
+                prev_v = soa.version_number - 1
+                change_summary = (
+                    f"Version {soa.version_number} - Replaces v{prev_v}, "
+                    f"uploaded by {uploader} "
+                    f"on {soa.uploaded_at.strftime('%Y-%m-%d %H:%M')}"
+                )
+            result.append(
+                {
+                    "id": str(soa.id),
+                    "versionNumber": soa.version_number,
+                    "uploadedAt": soa.uploaded_at.isoformat(),
+                    "uploadedBy": str(soa.uploaded_by_id),
+                    "uploadedByName": soa.uploaded_by.display_name
+                    or soa.uploaded_by.username,
+                    "changeSummary": change_summary,
+                    "downloadUrl": (
+                        f"/api/v1/batches/{obj.batch_id}/requests/{obj.id}/"
+                        f"soa/{soa.id}/download"
+                    ),
+                }
+            )
+        return result
 
 
 class PaymentRequestListSerializer(serializers.ModelSerializer):
@@ -154,12 +177,47 @@ class PaymentBatchSerializer(serializers.ModelSerializer):
 
 
 class PaymentBatchDetailSerializer(PaymentBatchSerializer):
-    """Serializer for PaymentBatch detail with requests."""
+    """Serializer for batch detail with requests, totals, Live SOA."""
 
     requests = PaymentRequestSerializer(many=True, read_only=True)
+    batchTotal = serializers.SerializerMethodField()
+    liveSoaSummary = serializers.SerializerMethodField()
 
     class Meta(PaymentBatchSerializer.Meta):
-        fields = PaymentBatchSerializer.Meta.fields + ["requests"]
+        fields = PaymentBatchSerializer.Meta.fields + [
+            "requests",
+            "batchTotal",
+            "liveSoaSummary",
+        ]
+
+    def get_batchTotal(self, obj):
+        """Compute sum of request amounts (totals validation)."""
+        from django.db.models import Sum
+
+        total = obj.requests.aggregate(total=Sum("amount"))["total"]
+        return str(total) if total is not None else "0"
+
+    def get_liveSoaSummary(self, obj):
+        """Live SOA view: computed latest SOA status per request."""
+        summary = []
+        requests = obj.requests.prefetch_related("soa_versions").all()
+        for req in requests:
+            soas = list(req.soa_versions.all().order_by("-version_number"))
+            latest = soas[0] if soas else None
+            summary.append(
+                {
+                    "requestId": str(req.id),
+                    "beneficiaryName": req.beneficiary_name,
+                    "amount": str(req.amount),
+                    "currency": req.currency,
+                    "hasSoa": len(soas) > 0,
+                    "latestVersion": latest.version_number if latest else None,
+                    "latestUploadedAt": (
+                        latest.uploaded_at.isoformat() if latest else None
+                    ),
+                }
+            )
+        return summary
 
 
 class ApprovalRequestSerializer(serializers.Serializer):

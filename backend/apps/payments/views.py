@@ -9,7 +9,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.pagination import LimitOffsetPagination
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponse
 from django.core.files.storage import default_storage
 
 from core.permissions import (
@@ -142,7 +142,9 @@ def get_batch(request, batchId):
     Get PaymentBatch detail with requests.
     """
     try:
-        batch = PaymentBatch.objects.prefetch_related("requests").get(id=batchId)
+        batch = PaymentBatch.objects.prefetch_related(
+            "requests", "requests__soa_versions"
+        ).get(id=batchId)
     except PaymentBatch.DoesNotExist:
         return Response(
             {
@@ -649,3 +651,67 @@ def download_soa_document(request, batchId, requestId, versionId):
         )
     except Exception:
         raise Http404("File not found")
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticatedReadOnly])
+def export_batch_soa(request, batchId):
+    """
+    GET /api/v1/batches/{batchId}/soa-export?format=pdf|excel
+
+    Export batch SOA as PDF or Excel (immutable snapshot).
+    Phase 3: SOA versioned export.
+    """
+    format_param = request.query_params.get("format", "pdf").lower()
+    if format_param not in ("pdf", "excel"):
+        return Response(
+            {
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Format must be 'pdf' or 'excel'",
+                    "details": {},
+                }
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        PaymentBatch.objects.get(id=batchId)
+    except PaymentBatch.DoesNotExist:
+        return Response(
+            {
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": f"PaymentBatch {batchId} does not exist",
+                    "details": {},
+                }
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    from apps.payments.soa_export import export_batch_soa_pdf, export_batch_soa_excel
+
+    try:
+        if format_param == "pdf":
+            content, filename = export_batch_soa_pdf(batchId)
+            content_type = "application/pdf"
+        else:
+            content, filename = export_batch_soa_excel(batchId)
+            content_type = (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        response = HttpResponse(content, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+    except PaymentBatch.DoesNotExist:
+        return Response(
+            {
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": "Batch not found",
+                    "details": {},
+                }
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )

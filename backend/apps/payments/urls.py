@@ -54,4 +54,10 @@ urlpatterns = [
         views.download_soa_document,
         name="download-soa-document",
     ),
+    # SOA export (Phase 3 - versioned export)
+    path(
+        "batches/<uuid:batchId>/soa-export",
+        views.export_batch_soa,
+        name="export-batch-soa",
+    ),
 ]

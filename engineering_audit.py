@@ -140,7 +140,8 @@ def scan_backend_for_raw_save():
             # Flag direct instance `.save(` usage outside service layer.
             # Structural model overrides legitimately call `super().save(...)` and
             # must not be flagged.
-            if "service" in str(pyfile):
+            # soa_export.py uses openpyxl Workbook.save(), not Django model save.
+            if "service" in str(pyfile) or "soa_export" in str(pyfile):
                 continue
 
             for line in content.splitlines():

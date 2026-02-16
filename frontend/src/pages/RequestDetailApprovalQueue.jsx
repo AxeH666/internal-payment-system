@@ -204,16 +204,52 @@ const RequestDetailApprovalQueue = () => {
 
       <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '4px' }}>
         <h2>Statement of Account Documents</h2>
+        <p style={{ color: '#6c757d', marginBottom: '15px' }}>
+          Version history — each version is immutable. Final SOA locks at submission.
+        </p>
         {soaVersions.length === 0 ? (
           <p>No Statement of Account documents.</p>
         ) : (
-          <ul>
+          <div>
             {soaVersions.map((soa) => (
-              <li key={soa.id} style={{ marginBottom: '10px' }}>
-                Version {soa.versionNumber} - Uploaded {new Date(soa.uploadedAt).toLocaleString()}
-              </li>
+              <div
+                key={soa.id}
+                style={{
+                  marginBottom: '16px',
+                  padding: '12px',
+                  backgroundColor: '#f8f9fa',
+                  borderRadius: '4px',
+                  borderLeft: '4px solid #007bff',
+                }}
+              >
+                <div style={{ fontWeight: 'bold', marginBottom: '6px' }}>
+                  Version {soa.versionNumber} — {soa.changeSummary || `Uploaded ${new Date(soa.uploadedAt).toLocaleString()}`}
+                </div>
+                {soa.downloadUrl && batchId && (
+                  <a
+                    href="#"
+                    style={{ color: '#007bff', textDecoration: 'none', fontSize: '14px' }}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      const apiPath = (soa.downloadUrl.split('/api/v1')[1] || soa.downloadUrl).replace(/^\//, '')
+                      api.get(apiPath, { responseType: 'blob' })
+                        .then((res) => {
+                          const url = URL.createObjectURL(new Blob([res.data]))
+                          const link = document.createElement('a')
+                          link.href = url
+                          link.download = `soa_v${soa.versionNumber}.pdf`
+                          link.click()
+                          URL.revokeObjectURL(url)
+                        })
+                        .catch(() => setError('Download failed'))
+                    }}
+                  >
+                    Download v{soa.versionNumber}
+                  </a>
+                )}
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </div>
     </div>
