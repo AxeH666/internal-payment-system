@@ -102,6 +102,41 @@ class PaymentRequest(models.Model):
         blank=True,
         related_name="updated_requests",
     )
+    # Phase 2: Ledger-driven payment fields (nullable for legacy compatibility)
+    entity_type = models.CharField(
+        max_length=20, choices=[("VENDOR", "Vendor"), ("SUBCONTRACTOR", "Subcontractor")], null=True, blank=True
+    )
+    vendor = models.ForeignKey(
+        "ledger.Vendor", on_delete=models.PROTECT, related_name="payment_requests", null=True, blank=True
+    )
+    subcontractor = models.ForeignKey(
+        "ledger.Subcontractor",
+        on_delete=models.PROTECT,
+        related_name="payment_requests",
+        null=True,
+        blank=True,
+    )
+    site = models.ForeignKey(
+        "ledger.Site", on_delete=models.PROTECT, related_name="payment_requests", null=True, blank=True
+    )
+    # Phase 2: Amount breakdown fields (nullable for legacy compatibility)
+    base_amount = models.DecimalField(
+        max_digits=15, decimal_places=2, validators=[MinValueValidator(0.01)], null=True, blank=True
+    )
+    extra_amount = models.DecimalField(
+        max_digits=15, decimal_places=2, validators=[MinValueValidator(0)], null=True, blank=True
+    )
+    extra_reason = models.TextField(null=True, blank=True)
+    total_amount = models.DecimalField(
+        max_digits=15, decimal_places=2, validators=[MinValueValidator(0.01)], null=True, blank=True
+    )
+    # Phase 2: Snapshot fields for historical preservation (nullable for legacy)
+    vendor_snapshot_name = models.CharField(max_length=255, null=True, blank=True)
+    site_snapshot_code = models.CharField(max_length=100, null=True, blank=True)
+    subcontractor_snapshot_name = models.CharField(max_length=255, null=True, blank=True)
+    # Phase 2: Version locking and execution tracking
+    version = models.IntegerField(default=1)
+    execution_id = models.UUIDField(null=True, blank=True, db_index=True)
 
     class Meta:
         db_table = "payment_requests"
@@ -127,6 +162,8 @@ class PaymentRequest(models.Model):
             models.Index(fields=["batch"], name="idx_request_batch"),
             models.Index(fields=["status"], name="idx_request_status"),
             models.Index(fields=["batch", "status"], name="idx_request_batch_status"),
+            models.Index(fields=["status", "batch"], name="idx_request_status_batch"),
+            models.Index(fields=["execution_id"], name="idx_request_execution_id"),
         ]
 
     def __str__(self):
