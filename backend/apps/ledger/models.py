@@ -40,9 +40,7 @@ class Site(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     code = models.CharField(max_length=100, unique=True)
     name = models.CharField(max_length=255)
-    client = models.ForeignKey(
-        Client, on_delete=models.PROTECT, related_name="sites"
-    )
+    client = models.ForeignKey(Client, on_delete=models.PROTECT, related_name="sites")
     is_active = models.BooleanField(default=True)
     effective_from = models.DateTimeField(default=timezone.now)
     deactivated_at = models.DateTimeField(null=True, blank=True)

@@ -26,6 +26,7 @@ urlpatterns = [
     ),  # GET, PATCH
     # Request endpoints (standalone)
     path("requests", views.list_pending_requests, name="list-pending-requests"),
+    path("requests/<uuid:requestId>", views.get_request, name="get-request"),  # GET
     path(
         "requests/<uuid:requestId>/approve",
         views.approve_request,

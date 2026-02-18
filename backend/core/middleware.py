@@ -68,10 +68,9 @@ class IdempotencyKeyMiddleware:
             ):
                 idempotency_key = request.headers.get("Idempotency-Key")
                 if not idempotency_key:
-                    from rest_framework.response import Response
-                    from rest_framework import status
+                    from django.http import JsonResponse
 
-                    return Response(
+                    return JsonResponse(
                         {
                             "error": {
                                 "code": "VALIDATION_ERROR",
@@ -79,7 +78,7 @@ class IdempotencyKeyMiddleware:
                                 "details": {},
                             }
                         },
-                        status=status.HTTP_400_BAD_REQUEST,
+                        status=400,
                     )
                 request.idempotency_key = idempotency_key
 

@@ -2,6 +2,7 @@
 Engineering audit: Enforce service layer pattern.
 Scans code and fails if PaymentRequest model operations detected outside services.py
 """
+
 import ast
 import sys
 from pathlib import Path
@@ -48,6 +49,7 @@ def main():
         sys.exit(1)
 
     print("OK: No direct PaymentRequest operations outside service layer")
+
 
 if __name__ == "__main__":
     main()

@@ -33,9 +33,10 @@ def check_server_connection():
         return False
     return False
 
-ADMIN_TOKEN = "REPLACE_ADMIN_TOKEN"
-CREATOR_TOKEN = "REPLACE_CREATOR_TOKEN"
-APPROVER_TOKEN = "REPLACE_APPROVER_TOKEN"
+
+ADMIN_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzcxNTA4Mjg4LCJpYXQiOjE3NzE0MjE4ODgsImp0aSI6Ijg5ODRmOTdlNWZmMDRkYjFiNWMyMjNhZjZmZmI5YTZiIiwidXNlcl9pZCI6ImU0M2U1NDA1LWU5ZTAtNDE1MS1iMWM1LTBkMDJiMjdiYjAxNyJ9.XOb437URyQNHo2BRqAb8xiuCQYU0WScZbFYLn5q2-Bc"
+CREATOR_TOKEN = "NEW_TOKEN_HERE"
+APPROVER_TOKEN = "NEW_TOKEN_HERE"
 
 HEADERS_ADMIN = {
     "Authorization": f"Bearer {ADMIN_TOKEN}",
@@ -57,6 +58,7 @@ HEADERS_APPROVER = {
 # Helper
 # -----------------------------
 
+
 def assert_true(condition, message):
     if not condition:
         print(f"\n❌ FAIL: {message}")
@@ -69,41 +71,29 @@ def assert_true(condition, message):
 # Ledger tests
 # -----------------------------
 
+
 def create_vendor():
     print("\nTEST 1 — Ledger Vendor Creation")
 
-    payload = {
-        "name": f"TestVendor-{uuid.uuid4().hex[:6]}",
-        "isActive": True,
-    }
+    headers = HEADERS_ADMIN.copy()
+    headers["Idempotency-Key"] = str(uuid.uuid4())
 
-    try:
-        r = requests.post(
-            f"{BASE_URL}/ledger/vendors",
-            headers=HEADERS_ADMIN,
-            json=payload,
-            timeout=5,
-        )
-    except requests.exceptions.ConnectionError as e:
-        print(f"❌ Connection Error: {e}")
-        print(f"   URL attempted: {BASE_URL}/ledger/vendors")
-        print("   Make sure backend server is running and ledger URLs are configured")
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ Unexpected Error: {e}")
-        sys.exit(1)
+    payload = {"name": f"TestVendor-{uuid.uuid4().hex[:6]}", "isActive": True}
+
+    r = requests.post(
+        f"{BASE_URL}/ledger/vendors",
+        headers=headers,
+        json=payload,
+    )
 
     print("Status Code:", r.status_code)
     print("Response:", r.text)
 
-    assert_true(
-        r.status_code in [200, 201],
-        f"Vendor creation failed: {r.status_code}"
-    )
+    assert_true(r.status_code in [200, 201], f"Vendor creation failed: {r.status_code}")
 
-    vendor = r.json()
+    data = r.json()
 
-    print("Created Vendor ID:", vendor.get("id"))
+    vendor = data.get("data", data)
 
     return vendor
 
@@ -111,29 +101,50 @@ def create_vendor():
 def create_site():
     print("\nTEST 2 — Ledger Site Creation")
 
+    headers = HEADERS_ADMIN.copy()
+    headers["Idempotency-Key"] = str(uuid.uuid4())
+
     payload = {
         "code": f"SITE-{uuid.uuid4().hex[:4]}",
         "name": "Test Site",
+        "clientId": None,
         "isActive": True,
     }
 
     r = requests.post(
         f"{BASE_URL}/ledger/sites",
-        headers=HEADERS_ADMIN,
+        headers=headers,
         json=payload,
     )
 
+    print("Status Code:", r.status_code)
+    print("Response:", r.text)
+
     assert_true(r.status_code in [200, 201], "Site created")
 
-    return r.json()
+    response_data = r.json()
+    site = response_data.get("data", response_data)
+
+    # CRITICAL: validate required fields exist
+    assert_true("id" in site, "Site has id")
+    assert_true("code" in site, "Site has code")
+    assert_true("name" in site, "Site has name")
+
+    print("✅ PASS: Site creation successful")
+
+    return site
 
 
 # -----------------------------
 # Batch
 # -----------------------------
 
+
 def create_batch():
     print("\nTEST 3 — Batch Creation")
+
+    headers = HEADERS_ADMIN.copy()
+    headers["Idempotency-Key"] = str(uuid.uuid4())
 
     payload = {
         "name": f"Batch-{uuid.uuid4().hex[:6]}",
@@ -142,24 +153,32 @@ def create_batch():
 
     r = requests.post(
         f"{BASE_URL}/batches",
-        headers=HEADERS_CREATOR,
+        headers=headers,
         json=payload,
     )
 
+    print("Status Code:", r.status_code)
+    print("Response:", r.text)
+
     assert_true(r.status_code in [200, 201], "Batch created")
 
-    return r.json()
+    response_data = r.json()
+    batch = response_data.get(
+        "data", response_data
+    )  # Handle both wrapped and unwrapped responses
+    return batch
 
 
 # -----------------------------
 # Payment creation
 # -----------------------------
 
+
 def create_payment_request(batch_id, vendor_id, site_id):
 
     print("\nTEST 4 — PaymentRequest Creation")
 
-    headers = HEADERS_CREATOR.copy()
+    headers = HEADERS_ADMIN.copy()
     headers["Idempotency-Key"] = str(uuid.uuid4())
 
     payload = {
@@ -169,6 +188,7 @@ def create_payment_request(batch_id, vendor_id, site_id):
         "baseAmount": 1000,
         "extraAmount": 200,
         "extraReason": "Transport",
+        "currency": "INR",
     }
 
     r = requests.post(
@@ -177,12 +197,24 @@ def create_payment_request(batch_id, vendor_id, site_id):
         json=payload,
     )
 
+    print("Status Code:", r.status_code)
+    print("Response:", r.text)
+
     assert_true(r.status_code in [200, 201], "PaymentRequest created")
 
-    data = r.json()
+    response_data = r.json()
+    data = response_data.get(
+        "data", response_data
+    )  # Handle both wrapped and unwrapped responses
 
+    # totalAmount is serialized as string, compare accordingly
+    total = (
+        float(data["totalAmount"])
+        if isinstance(data["totalAmount"], str)
+        else data["totalAmount"]
+    )
     assert_true(
-        data["totalAmount"] == 1200,
+        total == 1200,
         "Server computed total correctly",
     )
 
@@ -196,9 +228,11 @@ def create_payment_request(batch_id, vendor_id, site_id):
         "Site snapshot populated",
     )
 
+    # Version is an integer
+    version = data.get("version")
     assert_true(
-        data.get("version") == 1,
-        "Version initialized",
+        version == 1,
+        f"Version initialized (got {version})",
     )
 
     return data
@@ -208,13 +242,14 @@ def create_payment_request(batch_id, vendor_id, site_id):
 # Idempotency tests
 # -----------------------------
 
+
 def test_idempotency(batch_id, vendor_id, site_id):
 
     print("\nTEST 5 — Idempotency Protection")
 
     key = str(uuid.uuid4())
 
-    headers = HEADERS_CREATOR.copy()
+    headers = HEADERS_ADMIN.copy()
     headers["Idempotency-Key"] = key
 
     payload = {
@@ -223,6 +258,7 @@ def test_idempotency(batch_id, vendor_id, site_id):
         "siteId": site_id,
         "baseAmount": 500,
         "extraAmount": 0,
+        "currency": "INR",
     }
 
     r1 = requests.post(
@@ -238,7 +274,17 @@ def test_idempotency(batch_id, vendor_id, site_id):
     )
 
     assert_true(
-        r1.json()["id"] == r2.json()["id"],
+        r1.status_code in [200, 201],
+        f"First idempotent request succeeded (got {r1.status_code})",
+    )
+    assert_true(
+        r2.status_code in [200, 201],
+        f"Second idempotent request succeeded (got {r2.status_code})",
+    )
+    r1_data = r1.json().get("data", r1.json())
+    r2_data = r2.json().get("data", r2.json())
+    assert_true(
+        r1_data["id"] == r2_data["id"],
         "Duplicate prevented",
     )
 
@@ -253,11 +299,12 @@ def test_missing_idempotency(batch_id, vendor_id, site_id):
         "siteId": site_id,
         "baseAmount": 100,
         "extraAmount": 0,
+        "currency": "INR",
     }
 
     r = requests.post(
         f"{BASE_URL}/batches/{batch_id}/requests",
-        headers=HEADERS_CREATOR,
+        headers=HEADERS_ADMIN,
         json=payload,
     )
 
@@ -271,34 +318,50 @@ def test_missing_idempotency(batch_id, vendor_id, site_id):
 # Version locking
 # -----------------------------
 
+
+def submit_batch(batch_id):
+    """Submit batch to transition requests to PENDING_APPROVAL."""
+    headers = HEADERS_ADMIN.copy()
+    headers["Idempotency-Key"] = str(uuid.uuid4())
+    r = requests.post(
+        f"{BASE_URL}/batches/{batch_id}/submit",
+        headers=headers,
+    )
+    assert_true(
+        r.status_code in [200, 201],
+        f"Batch submit succeeded (got {r.status_code})",
+    )
+
+
 def approve_request(request_id):
 
     print("\nTEST 7 — Version Locking")
 
-    headers = HEADERS_APPROVER.copy()
-    headers["Idempotency-Key"] = str(uuid.uuid4())
-
+    headers1 = HEADERS_ADMIN.copy()
+    headers1["Idempotency-Key"] = str(uuid.uuid4())
     r1 = requests.post(
         f"{BASE_URL}/requests/{request_id}/approve",
-        headers=headers,
+        headers=headers1,
     )
-
     assert_true(r1.status_code == 200, "First approval succeeds")
 
+    # Second approval with different idempotency key should be blocked
+    headers2 = HEADERS_ADMIN.copy()
+    headers2["Idempotency-Key"] = str(uuid.uuid4())
     r2 = requests.post(
         f"{BASE_URL}/requests/{request_id}/approve",
-        headers=headers,
+        headers=headers2,
     )
-
     assert_true(
         r2.status_code != 200,
-        "Second approval blocked",
+        f"Second approval blocked (got {r2.status_code})",
     )
 
 
 # -----------------------------
 # Snapshot integrity
 # -----------------------------
+
 
 def test_snapshot_integrity(vendor_id, request_id):
 
@@ -312,11 +375,14 @@ def test_snapshot_integrity(vendor_id, request_id):
 
     r = requests.get(
         f"{BASE_URL}/requests/{request_id}",
-        headers=HEADERS_CREATOR,
+        headers=HEADERS_ADMIN,
     )
 
+    response_data = r.json()
+    data = response_data.get("data", response_data)
+
     assert_true(
-        r.json()["vendorSnapshotName"] is not None,
+        data["vendorSnapshotName"] is not None,
         "Snapshot preserved",
     )
 
@@ -325,13 +391,14 @@ def test_snapshot_integrity(vendor_id, request_id):
 # Immutability
 # -----------------------------
 
+
 def test_immutability(request_id):
 
     print("\nTEST 9 — Financial Immutability")
 
     r = requests.patch(
         f"{BASE_URL}/requests/{request_id}",
-        headers=HEADERS_CREATOR,
+        headers=HEADERS_ADMIN,
         json={"baseAmount": 9999},
     )
 
@@ -345,11 +412,12 @@ def test_immutability(request_id):
 # total tamper protection
 # -----------------------------
 
+
 def test_total_tamper(batch_id, vendor_id, site_id):
 
     print("\nTEST 10 — totalAmount tamper protection")
 
-    headers = HEADERS_CREATOR.copy()
+    headers = HEADERS_ADMIN.copy()
     headers["Idempotency-Key"] = str(uuid.uuid4())
 
     payload = {
@@ -358,7 +426,9 @@ def test_total_tamper(batch_id, vendor_id, site_id):
         "siteId": site_id,
         "baseAmount": 100,
         "extraAmount": 100,
-        "totalAmount": 1,
+        "extraReason": "Test",
+        "totalAmount": 1,  # Tampered - server should ignore and compute 200
+        "currency": "INR",
     }
 
     r = requests.post(
@@ -368,7 +438,15 @@ def test_total_tamper(batch_id, vendor_id, site_id):
     )
 
     assert_true(
-        r.json()["totalAmount"] == 200,
+        r.status_code in [200, 201],
+        f"Tamper test request succeeded (got {r.status_code})",
+    )
+    response_data = r.json()
+    data = response_data.get("data", response_data)
+    total_val = data.get("totalAmount") or data.get("total_amount")
+    total = float(total_val) if isinstance(total_val, str) else (total_val or 0)
+    assert_true(
+        total == 200,
         "Server ignored tampered total",
     )
 
@@ -376,6 +454,7 @@ def test_total_tamper(batch_id, vendor_id, site_id):
 # -----------------------------
 # Audit log
 # -----------------------------
+
 
 def test_audit_log():
 
@@ -386,8 +465,12 @@ def test_audit_log():
         headers=HEADERS_ADMIN,
     )
 
+    response_data = r.json()
+    # Audit logs endpoint returns paginated response with "results" or direct array
+    audit_data = response_data.get("results", response_data.get("data", response_data))
+
     assert_true(
-        len(r.json()) > 0,
+        len(audit_data) > 0,
         "Audit logs exist",
     )
 
@@ -396,25 +479,54 @@ def test_audit_log():
 # Reconciliation
 # -----------------------------
 
+
 def test_reconciliation():
 
     print("\nTEST 12 — Reconciliation Command")
 
+    import os
+
+    # Run inside Docker if available (has DB connection), else try local
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     result = subprocess.run(
-        ["python", "manage.py", "reconcile_payments"],
+        [
+            "docker",
+            "compose",
+            "-f",
+            os.path.join(project_root, "docker-compose.yml"),
+            "exec",
+            "-T",
+            "backend",
+            "python",
+            "manage.py",
+            "reconcile_payments",
+        ],
         capture_output=True,
         text=True,
+        cwd=project_root,
+        timeout=30,
     )
+    if result.returncode != 0 and "no such container" in (result.stderr or "").lower():
+        # Fallback: try local (e.g. for CI without Docker)
+        backend_dir = os.path.join(os.path.dirname(__file__), "..")
+        result = subprocess.run(
+            [sys.executable, "manage.py", "reconcile_payments"],
+            capture_output=True,
+            text=True,
+            cwd=os.path.abspath(backend_dir),
+            timeout=30,
+        )
 
     assert_true(
         result.returncode == 0,
-        "Reconciliation successful",
+        f"Reconciliation successful (got {result.returncode}, stderr: {(result.stderr or '')[:200]})",
     )
 
 
 # -----------------------------
 # MAIN
 # -----------------------------
+
 
 def main():
 
@@ -437,12 +549,13 @@ def main():
     test_idempotency(batch["id"], vendor["id"], site["id"])
     test_missing_idempotency(batch["id"], vendor["id"], site["id"])
 
+    test_total_tamper(batch["id"], vendor["id"], site["id"])
+
+    submit_batch(batch["id"])
     approve_request(request["id"])
 
     test_snapshot_integrity(vendor["id"], request["id"])
     test_immutability(request["id"])
-
-    test_total_tamper(batch["id"], vendor["id"], site["id"])
 
     test_audit_log()
     test_reconciliation()

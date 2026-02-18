@@ -234,9 +234,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="subcontractor",
-            index=models.Index(
-                fields=["assigned_site"], name="idx_subcontractor_site"
-            ),
+            index=models.Index(fields=["assigned_site"], name="idx_subcontractor_site"),
         ),
         migrations.AddConstraint(
             model_name="vendor",

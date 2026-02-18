@@ -14,12 +14,70 @@ from apps.payments.models import (
 
 
 class PaymentRequestSerializer(serializers.ModelSerializer):
-    """Serializer for PaymentRequest."""
+    """Serializer for PaymentRequest with Phase 2 fields."""
 
     id = serializers.UUIDField(read_only=True)
     batchId = serializers.UUIDField(source="batch_id", read_only=True)
-    beneficiaryName = serializers.CharField(source="beneficiary_name")
-    beneficiaryAccount = serializers.CharField(source="beneficiary_account")
+    # Legacy fields (Phase 1)
+    amount = serializers.DecimalField(
+        max_digits=15, decimal_places=2, required=False, allow_null=True
+    )
+    beneficiaryName = serializers.CharField(
+        source="beneficiary_name", required=False, allow_null=True
+    )
+    beneficiaryAccount = serializers.CharField(
+        source="beneficiary_account", required=False, allow_null=True
+    )
+    purpose = serializers.CharField(required=False, allow_null=True)
+    # Phase 2: Ledger-driven fields
+    entityType = serializers.CharField(
+        source="entity_type", required=False, allow_null=True
+    )
+    vendorId = serializers.UUIDField(
+        source="vendor_id", required=False, allow_null=True
+    )
+    subcontractorId = serializers.UUIDField(
+        source="subcontractor_id", required=False, allow_null=True
+    )
+    siteId = serializers.UUIDField(source="site_id", required=False, allow_null=True)
+    baseAmount = serializers.DecimalField(
+        source="base_amount",
+        max_digits=15,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+    )
+    extraAmount = serializers.DecimalField(
+        source="extra_amount",
+        max_digits=15,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+    )
+    extraReason = serializers.CharField(
+        source="extra_reason", required=False, allow_null=True
+    )
+    totalAmount = serializers.DecimalField(
+        source="total_amount", max_digits=15, decimal_places=2, read_only=True
+    )
+    # Phase 2: Snapshot fields (read-only, display-safe)
+    vendorSnapshotName = serializers.CharField(
+        source="vendor_snapshot_name", read_only=True, allow_null=True
+    )
+    siteSnapshotCode = serializers.CharField(
+        source="site_snapshot_code", read_only=True, allow_null=True
+    )
+    subcontractorSnapshotName = serializers.CharField(
+        source="subcontractor_snapshot_name", read_only=True, allow_null=True
+    )
+    entityName = serializers.SerializerMethodField()
+    # Phase 2: Version and execution tracking
+    version = serializers.IntegerField(read_only=True)
+    executionId = serializers.UUIDField(
+        source="execution_id", read_only=True, allow_null=True
+    )
+    # Common fields
+    currency = serializers.CharField(required=False)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     createdBy = serializers.UUIDField(source="created_by_id", read_only=True)
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
@@ -32,11 +90,28 @@ class PaymentRequestSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "batchId",
+            # Legacy fields
             "amount",
             "currency",
             "beneficiaryName",
             "beneficiaryAccount",
             "purpose",
+            # Phase 2 fields
+            "entityType",
+            "vendorId",
+            "subcontractorId",
+            "siteId",
+            "baseAmount",
+            "extraAmount",
+            "extraReason",
+            "totalAmount",
+            "vendorSnapshotName",
+            "siteSnapshotCode",
+            "subcontractorSnapshotName",
+            "entityName",
+            "version",
+            "executionId",
+            # Status and timestamps
             "status",
             "createdAt",
             "createdBy",
@@ -46,11 +121,26 @@ class PaymentRequestSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "status",
+            "totalAmount",
+            "vendorSnapshotName",
+            "siteSnapshotCode",
+            "subcontractorSnapshotName",
+            "entityName",
+            "version",
+            "executionId",
             "createdAt",
             "createdBy",
             "updatedAt",
             "updatedBy",
         ]
+
+    def get_entityName(self, obj):
+        """Get entity name (display-safe, no business rules)."""
+        if obj.entity_type == "VENDOR" and obj.vendor_snapshot_name:
+            return obj.vendor_snapshot_name
+        elif obj.entity_type == "SUBCONTRACTOR" and obj.subcontractor_snapshot_name:
+            return obj.subcontractor_snapshot_name
+        return None
 
 
 class PaymentRequestDetailSerializer(PaymentRequestSerializer):
@@ -123,6 +213,8 @@ class PaymentRequestListSerializer(serializers.ModelSerializer):
     batchId = serializers.UUIDField(source="batch_id", read_only=True)
     batchTitle = serializers.CharField(source="batch.title", read_only=True)
     beneficiaryName = serializers.CharField(source="beneficiary_name", read_only=True)
+    entityName = serializers.SerializerMethodField()
+    totalAmount = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
 
     class Meta:
@@ -132,12 +224,30 @@ class PaymentRequestListSerializer(serializers.ModelSerializer):
             "batchId",
             "batchTitle",
             "amount",
+            "totalAmount",
             "currency",
             "beneficiaryName",
+            "entityName",
             "purpose",
             "status",
             "createdAt",
         ]
+
+    def get_entityName(self, obj):
+        """Get entity name (display-safe)."""
+        if obj.entity_type == "VENDOR" and obj.vendor_snapshot_name:
+            return obj.vendor_snapshot_name
+        elif obj.entity_type == "SUBCONTRACTOR" and obj.subcontractor_snapshot_name:
+            return obj.subcontractor_snapshot_name
+        return None
+
+    def get_totalAmount(self, obj):
+        """Get total amount (ledger-driven) or amount (legacy)."""
+        if obj.total_amount is not None:
+            return str(obj.total_amount)
+        elif obj.amount is not None:
+            return str(obj.amount)
+        return None
 
 
 class PaymentBatchSerializer(serializers.ModelSerializer):
@@ -197,10 +307,17 @@ class PaymentBatchDetailSerializer(PaymentBatchSerializer):
 
     def get_batchTotal(self, obj):
         """Compute sum of request amounts (totals validation)."""
-        from django.db.models import Sum
+        from django.db.models import Sum, Q
+        from decimal import Decimal
 
-        total = obj.requests.aggregate(total=Sum("amount"))["total"]
-        return str(total) if total is not None else "0"
+        # Sum total_amount where present (ledger-driven), else amount (legacy)
+        total = Decimal("0")
+        for req in obj.requests.all():
+            if req.total_amount is not None:
+                total += req.total_amount
+            elif req.amount is not None:
+                total += req.amount
+        return str(total)
 
     def get_liveSoaSummary(self, obj):
         """Live SOA view: computed latest SOA status per request."""

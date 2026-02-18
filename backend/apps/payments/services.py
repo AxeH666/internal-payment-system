@@ -48,7 +48,7 @@ def create_batch(creator_id, title):
         ValidationError: If title is empty
         NotFoundError: If creator does not exist
     """
-    from apps.users.models import User
+    from apps.users.models import User, Role
 
     if not title or not title.strip():
         raise ValidationError("Title must be non-empty")
@@ -126,7 +126,7 @@ def add_request(
         PermissionDeniedError: If creator is not batch creator
         ValidationError: If validation fails
     """
-    from apps.users.models import User
+    from apps.users.models import User, Role, Role
     from apps.ledger.models import Vendor, Subcontractor, Site
     from apps.payments.models import IdempotencyKey
 
@@ -141,139 +141,141 @@ def add_request(
             except PaymentRequest.DoesNotExist:
                 pass  # Key exists but object missing, proceed with creation
 
-    try:
-        batch = PaymentBatch.objects.select_for_update().get(id=batch_id)
-    except PaymentBatch.DoesNotExist:
-        raise NotFoundError(f"PaymentBatch {batch_id} does not exist")
-
-    try:
-        creator = User.objects.get(id=creator_id)
-    except User.DoesNotExist:
-        raise NotFoundError(f"User {creator_id} does not exist")
-
-    # Check ownership
-    if creator.role != "ADMIN" and batch.created_by_id != creator_id:
-        raise PermissionDeniedError("Only the batch creator can add requests")
-
-    # Check batch state
-    if batch.status != "DRAFT":
-        raise InvalidStateError(
-            f"Cannot add request to batch with status {batch.status}"
-        )
-
-    if is_closed_batch(batch.status):
-        raise InvalidStateError("Cannot add request to closed batch")
-
-    # Determine if legacy or ledger-driven
-    is_ledger_driven = entity_type is not None
-
-    if is_ledger_driven:
-        # Phase 2: Ledger-driven validation
-        if entity_type not in ("VENDOR", "SUBCONTRACTOR"):
-            raise ValidationError("entity_type must be VENDOR or SUBCONTRACTOR")
-
-        if entity_type == "VENDOR":
-            if not vendor_id:
-                raise ValidationError("vendor_id is required when entity_type=VENDOR")
-            if subcontractor_id:
-                raise ValidationError(
-                    "Cannot specify both vendor_id and subcontractor_id"
-                )
-            try:
-                vendor = Vendor.objects.select_for_update().get(
-                    id=vendor_id, is_active=True
-                )
-            except Vendor.DoesNotExist:
-                raise NotFoundError(f"Active Vendor {vendor_id} does not exist")
-            entity_obj = vendor
-            entity_name = vendor.name
-        else:  # SUBCONTRACTOR
-            if not subcontractor_id:
-                raise ValidationError(
-                    "subcontractor_id is required when entity_type=SUBCONTRACTOR"
-                )
-            if vendor_id:
-                raise ValidationError(
-                    "Cannot specify both vendor_id and subcontractor_id"
-                )
-            try:
-                subcontractor = Subcontractor.objects.select_for_update().get(
-                    id=subcontractor_id, is_active=True
-                )
-            except Subcontractor.DoesNotExist:
-                raise NotFoundError(
-                    f"Active Subcontractor {subcontractor_id} does not exist"
-                )
-            entity_obj = subcontractor
-            entity_name = subcontractor.name
-
-        if not site_id:
-            raise ValidationError("site_id is required for ledger-driven requests")
+    with transaction.atomic():
         try:
-            site = Site.objects.select_for_update().get(id=site_id, is_active=True)
-        except Site.DoesNotExist:
-            raise NotFoundError(f"Active Site {site_id} does not exist")
+            batch = PaymentBatch.objects.select_for_update().get(id=batch_id)
+        except PaymentBatch.DoesNotExist:
+            raise NotFoundError(f"PaymentBatch {batch_id} does not exist")
 
-        # Amount validation
-        if base_amount is None or base_amount <= 0:
-            raise ValidationError("base_amount must be positive")
-        if extra_amount is None:
-            extra_amount = 0
-        if extra_amount < 0:
-            raise ValidationError("extra_amount must be non-negative")
-        if extra_amount > 0 and not extra_reason:
-            raise ValidationError("extra_reason is required when extra_amount > 0")
+        try:
+            creator = User.objects.get(id=creator_id)
+        except User.DoesNotExist:
+            raise NotFoundError(f"User {creator_id} does not exist")
 
-        # Compute total server-side
-        total_amount = base_amount + extra_amount
+        # Check ownership
+        if creator.role != Role.ADMIN and batch.created_by_id != creator_id:
+            raise PermissionDeniedError("Only the batch creator can add requests")
 
-        # Soft guidance: subcontractor site override warning
-        if (
-            entity_type == "SUBCONTRACTOR"
-            and subcontractor.assigned_site_id
-            and str(site_id) != str(subcontractor.assigned_site_id)
-        ):
-            # Create audit warning entry
-            create_audit_entry(
-                event_type="SUBCONTRACTOR_SITE_OVERRIDE",
-                actor_id=creator_id,
-                entity_type="PaymentRequest",
-                entity_id=None,  # Will be set after creation
-                previous_state={
-                    "assigned_site_id": str(subcontractor.assigned_site_id),
-                    "assigned_site_code": subcontractor.assigned_site.code,
-                },
-                new_state={
-                    "selected_site_id": str(site_id),
-                    "selected_site_code": site.code,
-                },
+        # Check batch state
+        if batch.status != "DRAFT":
+            raise InvalidStateError(
+                f"Cannot add request to batch with status {batch.status}"
             )
 
-        # Validate currency
-        if not currency or len(currency) != 3:
-            raise ValidationError("Currency must be a three-letter code")
+        if is_closed_batch(batch.status):
+            raise InvalidStateError("Cannot add request to closed batch")
 
-        # Populate snapshots (mandatory for ledger-driven)
-        vendor_snapshot_name = vendor.name if entity_type == "VENDOR" else None
-        subcontractor_snapshot_name = (
-            subcontractor.name if entity_type == "SUBCONTRACTOR" else None
-        )
-        site_snapshot_code = site.code
+        # Determine if legacy or ledger-driven
+        is_ledger_driven = entity_type is not None
 
-    else:
-        # Phase 1: Legacy validation
-        if not amount or amount <= 0:
-            raise ValidationError("Amount must be positive")
-        if not currency or len(currency) != 3:
-            raise ValidationError("Currency must be a three-letter code")
-        if not beneficiary_name or not beneficiary_name.strip():
-            raise ValidationError("Beneficiary name must be non-empty")
-        if not beneficiary_account or not beneficiary_account.strip():
-            raise ValidationError("Beneficiary account must be non-empty")
-        if not purpose or not purpose.strip():
-            raise ValidationError("Purpose must be non-empty")
+        if is_ledger_driven:
+            # Phase 2: Ledger-driven validation
+            if entity_type not in ("VENDOR", "SUBCONTRACTOR"):
+                raise ValidationError("entity_type must be VENDOR or SUBCONTRACTOR")
 
-    with transaction.atomic():
+            if entity_type == "VENDOR":
+                if not vendor_id:
+                    raise ValidationError(
+                        "vendor_id is required when entity_type=VENDOR"
+                    )
+                if subcontractor_id:
+                    raise ValidationError(
+                        "Cannot specify both vendor_id and subcontractor_id"
+                    )
+                try:
+                    vendor = Vendor.objects.select_for_update().get(
+                        id=vendor_id, is_active=True
+                    )
+                except Vendor.DoesNotExist:
+                    raise NotFoundError(f"Active Vendor {vendor_id} does not exist")
+                entity_obj = vendor
+                entity_name = vendor.name
+            else:  # SUBCONTRACTOR
+                if not subcontractor_id:
+                    raise ValidationError(
+                        "subcontractor_id is required when entity_type=SUBCONTRACTOR"
+                    )
+                if vendor_id:
+                    raise ValidationError(
+                        "Cannot specify both vendor_id and subcontractor_id"
+                    )
+                try:
+                    subcontractor = Subcontractor.objects.select_for_update().get(
+                        id=subcontractor_id, is_active=True
+                    )
+                except Subcontractor.DoesNotExist:
+                    raise NotFoundError(
+                        f"Active Subcontractor {subcontractor_id} does not exist"
+                    )
+                entity_obj = subcontractor
+                entity_name = subcontractor.name
+
+            if not site_id:
+                raise ValidationError("site_id is required for ledger-driven requests")
+            try:
+                site = Site.objects.select_for_update().get(id=site_id, is_active=True)
+            except Site.DoesNotExist:
+                raise NotFoundError(f"Active Site {site_id} does not exist")
+
+            # Amount validation
+            if base_amount is None or base_amount <= 0:
+                raise ValidationError("base_amount must be positive")
+            if extra_amount is None:
+                extra_amount = 0
+            if extra_amount < 0:
+                raise ValidationError("extra_amount must be non-negative")
+            if extra_amount > 0 and not extra_reason:
+                raise ValidationError("extra_reason is required when extra_amount > 0")
+
+            # Compute total server-side
+            total_amount = base_amount + extra_amount
+
+            # Soft guidance: subcontractor site override warning
+            if (
+                entity_type == "SUBCONTRACTOR"
+                and subcontractor.assigned_site_id
+                and str(site_id) != str(subcontractor.assigned_site_id)
+            ):
+                # Create audit warning entry
+                create_audit_entry(
+                    event_type="SUBCONTRACTOR_SITE_OVERRIDE",
+                    actor_id=creator_id,
+                    entity_type="PaymentRequest",
+                    entity_id=None,  # Will be set after creation
+                    previous_state={
+                        "assigned_site_id": str(subcontractor.assigned_site_id),
+                        "assigned_site_code": subcontractor.assigned_site.code,
+                    },
+                    new_state={
+                        "selected_site_id": str(site_id),
+                        "selected_site_code": site.code,
+                    },
+                )
+
+            # Validate currency
+            if not currency or len(currency) != 3:
+                raise ValidationError("Currency must be a three-letter code")
+
+            # Populate snapshots (mandatory for ledger-driven)
+            vendor_snapshot_name = vendor.name if entity_type == "VENDOR" else None
+            subcontractor_snapshot_name = (
+                subcontractor.name if entity_type == "SUBCONTRACTOR" else None
+            )
+            site_snapshot_code = site.code
+
+        else:
+            # Phase 1: Legacy validation
+            if not amount or amount <= 0:
+                raise ValidationError("Amount must be positive")
+            if not currency or len(currency) != 3:
+                raise ValidationError("Currency must be a three-letter code")
+            if not beneficiary_name or not beneficiary_name.strip():
+                raise ValidationError("Beneficiary name must be non-empty")
+            if not beneficiary_account or not beneficiary_account.strip():
+                raise ValidationError("Beneficiary account must be non-empty")
+            if not purpose or not purpose.strip():
+                raise ValidationError("Purpose must be non-empty")
+
         # Create request
         request_data = {
             "batch": batch,
@@ -285,6 +287,7 @@ def add_request(
         if is_ledger_driven:
             request_data.update(
                 {
+                    "amount": total_amount,  # Legacy amount field for display/constraints
                     "entity_type": entity_type,
                     "vendor": vendor if entity_type == "VENDOR" else None,
                     "subcontractor": (
@@ -376,7 +379,7 @@ def update_request(request_id, batch_id, creator_id, **fields):
         PermissionDeniedError: If creator is not batch creator
         ValidationError: If validation fails
     """
-    from apps.users.models import User
+    from apps.users.models import User, Role
 
     try:
         request = PaymentRequest.objects.select_for_update().get(id=request_id)
@@ -394,7 +397,7 @@ def update_request(request_id, batch_id, creator_id, **fields):
         raise NotFoundError(f"User {creator_id} does not exist")
 
     # Check ownership
-    if creator.role != "ADMIN" and request.batch.created_by_id != creator_id:
+    if creator.role != Role.ADMIN and request.batch.created_by_id != creator_id:
         raise PermissionDeniedError("Only the batch creator can update requests")
 
     # Check request state
@@ -492,68 +495,78 @@ def submit_batch(batch_id, creator_id):
         PermissionDeniedError: If creator is not batch creator
         PreconditionFailedError: If batch is empty or invalid
     """
-    from apps.users.models import User
-
-    try:
-        batch = PaymentBatch.objects.select_for_update().get(id=batch_id)
-    except PaymentBatch.DoesNotExist:
-        raise NotFoundError(f"PaymentBatch {batch_id} does not exist")
-
-    try:
-        creator = User.objects.get(id=creator_id)
-    except User.DoesNotExist:
-        raise NotFoundError(f"User {creator_id} does not exist")
-
-    # Check ownership
-    if creator.role != "ADMIN" and batch.created_by_id != creator_id:
-        raise PermissionDeniedError("Only the batch creator can submit the batch")
-
-    # Check batch state
-    if batch.status != "DRAFT":
-        # Idempotency: if already SUBMITTED, return success
-        if batch.status == "SUBMITTED":
-            return batch
-        raise InvalidStateError(f"Cannot submit batch with status {batch.status}")
-
-    # Get all requests with lock (consistent order by id)
-    requests = list(
-        PaymentRequest.objects.filter(batch=batch).select_for_update().order_by("id")
-    )
-
-    if not requests:
-        raise PreconditionFailedError("Batch must contain at least one payment request")
-
-        # Validate all requests are DRAFT
-    for req in requests:
-        if req.status != "DRAFT":
-            raise InvalidStateError(
-                f"All requests must be DRAFT. Request {req.id} has status {req.status}"
-            )
-
-        # Validate request data (support both legacy and ledger-driven)
-        if req.entity_type:
-            # Ledger-driven validation
-            if not req.total_amount or req.total_amount <= 0:
-                raise PreconditionFailedError(
-                    f"Request {req.id} has invalid total_amount"
-                )
-            if not req.site_id:
-                raise PreconditionFailedError(
-                    f"Request {req.id} is missing site (ledger-driven)"
-                )
-        else:
-            # Legacy validation
-            if req.amount <= 0:
-                raise PreconditionFailedError(f"Request {req.id} has invalid amount")
-            if not req.beneficiary_name or not req.beneficiary_account or not req.purpose:
-                raise PreconditionFailedError(
-                    f"Request {req.id} has missing required fields"
-                )
-
-        if not req.currency or len(req.currency) != 3:
-            raise PreconditionFailedError(f"Request {req.id} has invalid currency")
+    from apps.users.models import User, Role
 
     with transaction.atomic():
+        try:
+            batch = PaymentBatch.objects.select_for_update().get(id=batch_id)
+        except PaymentBatch.DoesNotExist:
+            raise NotFoundError(f"PaymentBatch {batch_id} does not exist")
+
+        try:
+            creator = User.objects.get(id=creator_id)
+        except User.DoesNotExist:
+            raise NotFoundError(f"User {creator_id} does not exist")
+
+        # Check ownership
+        if creator.role != Role.ADMIN and batch.created_by_id != creator_id:
+            raise PermissionDeniedError("Only the batch creator can submit the batch")
+
+        # Check batch state
+        if batch.status != "DRAFT":
+            # Idempotency: if already SUBMITTED, return success
+            if batch.status == "SUBMITTED":
+                return batch
+            raise InvalidStateError(f"Cannot submit batch with status {batch.status}")
+
+        # Get all requests with lock (consistent order by id)
+        requests = list(
+            PaymentRequest.objects.filter(batch=batch)
+            .select_for_update()
+            .order_by("id")
+        )
+
+        if not requests:
+            raise PreconditionFailedError(
+                "Batch must contain at least one payment request"
+            )
+
+        # Validate all requests are DRAFT
+        for req in requests:
+            if req.status != "DRAFT":
+                raise InvalidStateError(
+                    f"All requests must be DRAFT. Request {req.id} has status {req.status}"
+                )
+
+            # Validate request data (support both legacy and ledger-driven)
+            if req.entity_type:
+                # Ledger-driven validation
+                if not req.total_amount or req.total_amount <= 0:
+                    raise PreconditionFailedError(
+                        f"Request {req.id} has invalid total_amount"
+                    )
+                if not req.site_id:
+                    raise PreconditionFailedError(
+                        f"Request {req.id} is missing site (ledger-driven)"
+                    )
+            else:
+                # Legacy validation
+                if req.amount <= 0:
+                    raise PreconditionFailedError(
+                        f"Request {req.id} has invalid amount"
+                    )
+                if (
+                    not req.beneficiary_name
+                    or not req.beneficiary_account
+                    or not req.purpose
+                ):
+                    raise PreconditionFailedError(
+                        f"Request {req.id} has missing required fields"
+                    )
+
+            if not req.currency or len(req.currency) != 3:
+                raise PreconditionFailedError(f"Request {req.id} has invalid currency")
+
         # Update batch
         now = timezone.now()
         batch.status = "SUBMITTED"
@@ -634,7 +647,7 @@ def cancel_batch(batch_id, creator_id):
         InvalidStateError: If batch is not DRAFT
         PermissionDeniedError: If creator is not batch creator
     """
-    from apps.users.models import User
+    from apps.users.models import User, Role
 
     try:
         batch = PaymentBatch.objects.select_for_update().get(id=batch_id)
@@ -649,7 +662,7 @@ def cancel_batch(batch_id, creator_id):
     creator.pk
 
     # Check ownership
-    if creator.role != "ADMIN" and batch.created_by_id != creator_id:
+    if creator.role != Role.ADMIN and batch.created_by_id != creator_id:
         raise PermissionDeniedError("Only the batch creator can cancel the batch")
 
     # Check batch state
@@ -697,7 +710,7 @@ def approve_request(request_id, approver_id, comment=None, idempotency_key=None)
         PermissionDeniedError: If approver does not have APPROVER role
         PreconditionFailedError: If ApprovalRecord already exists
     """
-    from apps.users.models import User
+    from apps.users.models import User, Role
     from apps.payments.models import IdempotencyKey
 
     # Idempotency check
@@ -711,38 +724,37 @@ def approve_request(request_id, approver_id, comment=None, idempotency_key=None)
             except PaymentRequest.DoesNotExist:
                 pass  # Key exists but object missing, proceed with approval
 
-    try:
-        request = PaymentRequest.objects.select_for_update().get(id=request_id)
-    except PaymentRequest.DoesNotExist:
-        raise NotFoundError(f"PaymentRequest {request_id} does not exist")
-
-    try:
-        approver = User.objects.get(id=approver_id)
-    except User.DoesNotExist:
-        raise NotFoundError(f"User {approver_id} does not exist")
-
-    # Check role
-    if approver.role != "APPROVER":
-        raise PermissionDeniedError(
-            "Only users with APPROVER role can approve requests"
-        )
-
-    # Check request state
-    if request.status != "PENDING_APPROVAL":
-        # Idempotency: if already APPROVED, return success
-        if request.status == "APPROVED":
-            return request
-        raise InvalidStateError(f"Cannot approve request with status {request.status}")
-
-    # Check if ApprovalRecord already exists
-    if hasattr(request, "approval"):
-        # Idempotency: return success without duplicate
-        return request
-
     with transaction.atomic():
-        # Set transaction isolation level for financial operations
-        with connection.cursor() as cursor:
-            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        try:
+            request = PaymentRequest.objects.select_for_update().get(id=request_id)
+        except PaymentRequest.DoesNotExist:
+            raise NotFoundError(f"PaymentRequest {request_id} does not exist")
+
+        try:
+            approver = User.objects.get(id=approver_id)
+        except User.DoesNotExist:
+            raise NotFoundError(f"User {approver_id} does not exist")
+
+        # Check role (ADMIN can approve as well)
+        if approver.role not in (Role.APPROVER, Role.ADMIN):
+            raise PermissionDeniedError(
+                "Only users with APPROVER or ADMIN role can approve requests"
+            )
+
+        # Check request state
+        if request.status != "PENDING_APPROVAL":
+            if request.status == "APPROVED":
+                # Idempotency: same key = return success (retry); different key = block
+                if idempotency_key:
+                    existing = IdempotencyKey.objects.filter(
+                        key=idempotency_key, operation="APPROVE_PAYMENT_REQUEST"
+                    ).first()
+                    if existing and existing.target_object_id:
+                        return request
+                raise InvalidStateError("Request has already been approved")
+            raise InvalidStateError(
+                f"Cannot approve request with status {request.status}"
+            )
 
         # Create ApprovalRecord
         ApprovalRecord.objects.create(
@@ -810,7 +822,7 @@ def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
         PermissionDeniedError: If approver does not have APPROVER role
         PreconditionFailedError: If ApprovalRecord already exists
     """
-    from apps.users.models import User
+    from apps.users.models import User, Role
     from apps.payments.models import IdempotencyKey
 
     # Idempotency check
@@ -834,9 +846,11 @@ def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
     except User.DoesNotExist:
         raise NotFoundError(f"User {approver_id} does not exist")
 
-    # Check role
-    if approver.role != "APPROVER":
-        raise PermissionDeniedError("Only users with APPROVER role can reject requests")
+    # Check role (ADMIN can reject as well)
+    if approver.role not in (Role.APPROVER, Role.ADMIN):
+        raise PermissionDeniedError(
+            "Only users with APPROVER or ADMIN role can reject requests"
+        )
 
     # Check request state
     if request.status != "PENDING_APPROVAL":
@@ -919,7 +933,7 @@ def mark_paid(request_id, actor_id, idempotency_key=None):
         InvalidStateError: If request is not APPROVED
         PermissionDeniedError: If actor does not have required role
     """
-    from apps.users.models import User
+    from apps.users.models import User, Role
     from apps.payments.models import IdempotencyKey
 
     # Idempotency check
@@ -1051,7 +1065,7 @@ def upload_soa(batch_id, request_id, creator_id, file):
         PermissionDeniedError: If creator is not batch creator
         ValidationError: If file is missing
     """
-    from apps.users.models import User
+    from apps.users.models import User, Role
     from django.core.files.storage import default_storage
     from django.core.files.base import ContentFile
 
@@ -1071,7 +1085,7 @@ def upload_soa(batch_id, request_id, creator_id, file):
         raise NotFoundError(f"User {creator_id} does not exist")
 
     # Check ownership
-    if creator.role != "ADMIN" and request.batch.created_by_id != creator_id:
+    if creator.role != Role.ADMIN and request.batch.created_by_id != creator_id:
         raise PermissionDeniedError("Only the batch creator can upload SOA")
 
     # Check request state

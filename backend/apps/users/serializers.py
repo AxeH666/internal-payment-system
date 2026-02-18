@@ -5,14 +5,14 @@ No business logic in serializers - validation only.
 """
 
 from rest_framework import serializers
-from apps.users.models import User
+from apps.users.models import User, Role
 
 
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model."""
 
     id = serializers.UUIDField(read_only=True)
-    role = serializers.ChoiceField(choices=User.ROLE_CHOICES, read_only=True)
+    role = serializers.ChoiceField(choices=Role.choices, read_only=True)
 
     class Meta:
         model = User

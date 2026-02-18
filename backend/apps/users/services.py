@@ -70,21 +70,33 @@ def create_superuser(
 
 def user_is_staff(*, user: Any) -> bool:
     """Django admin compatibility predicate."""
-    return user.role in ("CREATOR", "ADMIN")
+    # Import here to avoid circular import
+    from apps.users.models import Role
+
+    return user.role in (Role.CREATOR, Role.ADMIN)
 
 
 def user_is_superuser(*, user: Any) -> bool:
     """Django admin compatibility predicate."""
-    return user.role in ("CREATOR", "ADMIN")
+    # Import here to avoid circular import
+    from apps.users.models import Role
+
+    return user.role in (Role.CREATOR, Role.ADMIN)
 
 
 def user_has_perm(*, user: Any, perm: str, obj: Any = None) -> bool:
     """Django admin compatibility predicate."""
     _ = (perm, obj)
-    return user.role in ("CREATOR", "ADMIN")
+    # Import here to avoid circular import
+    from apps.users.models import Role
+
+    return user.role in (Role.CREATOR, Role.ADMIN)
 
 
 def user_has_module_perms(*, user: Any, app_label: str) -> bool:
     """Django admin compatibility predicate."""
     _ = app_label
-    return user.role in ("CREATOR", "ADMIN")
+    # Import here to avoid circular import
+    from apps.users.models import Role
+
+    return user.role in (Role.CREATOR, Role.ADMIN)

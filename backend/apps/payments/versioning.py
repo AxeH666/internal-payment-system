@@ -2,6 +2,7 @@
 Version locking helper for PaymentRequest state transitions.
 Prevents concurrent modification corruption.
 """
+
 from django.db.models import F
 from core.exceptions import InvalidStateError
 

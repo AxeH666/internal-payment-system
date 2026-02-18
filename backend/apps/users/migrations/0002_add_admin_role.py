@@ -1,6 +1,6 @@
 # Add ADMIN role to valid_role constraint.
-# Requires: users table must exist (create via makemigrations users if needed).
-# Depends on payments.0001 so User table exists before we alter constraint.
+# Requires: users table must exist (created by 0001_initial).
+# Depends on users.0001_initial to ensure User table exists before we alter constraint.
 
 from django.db import migrations
 
@@ -32,7 +32,7 @@ def reverse_add_admin_role_constraint(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("payments", "0001_initial"),
+        ("users", "0001_initial"),
     ]
 
     operations = [

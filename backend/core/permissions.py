@@ -8,6 +8,19 @@ Role is NEVER read from request body, query parameters, or headers.
 from rest_framework import permissions
 
 
+class IsAdmin(permissions.BasePermission):
+    """Allow ADMIN role only."""
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        if not hasattr(request.user, "role"):
+            return False
+
+        return request.user.role == "ADMIN"
+
+
 class IsCreator(permissions.BasePermission):
     """Allow CREATOR or ADMIN role."""
 

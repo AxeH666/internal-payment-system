@@ -13,6 +13,13 @@ from django.core.validators import RegexValidator
 from . import services
 
 
+class Role(models.TextChoices):
+    ADMIN = "ADMIN"
+    CREATOR = "CREATOR"
+    APPROVER = "APPROVER"
+    VIEWER = "VIEWER"
+
+
 class UserManager(BaseUserManager):
     """Custom user manager."""
 
@@ -42,13 +49,6 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser):
     """Custom User model with UUID primary key and role field."""
 
-    ROLE_CHOICES = [
-        ("CREATOR", "Creator"),
-        ("APPROVER", "Approver"),
-        ("VIEWER", "Viewer"),
-        ("ADMIN", "Admin"),
-    ]
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     username = models.CharField(
         max_length=150,
@@ -64,7 +64,7 @@ class User(AbstractBaseUser):
         ],
     )
     display_name = models.CharField(max_length=255)
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    role = models.CharField(max_length=20, choices=Role.choices)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -53,7 +53,8 @@ def create_or_list_batches(request):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        title = request.data.get("title")
+        # Accept both "title" and "name" for compatibility
+        title = request.data.get("title") or request.data.get("name")
 
         if not title or not title.strip():
             return Response(
@@ -222,19 +223,35 @@ def add_request(request, batchId):
     POST /api/v1/batches/{batchId}/requests
 
     Add a PaymentRequest to a PaymentBatch.
+    Supports both legacy (Phase 1) and ledger-driven (Phase 2) creation.
     """
+    from decimal import Decimal, InvalidOperation
+
+    # Phase 2: Ledger-driven fields
+    entity_type = request.data.get("entityType")
+    vendor_id = request.data.get("vendorId")
+    subcontractor_id = request.data.get("subcontractorId")
+    site_id = request.data.get("siteId")
+    base_amount = request.data.get("baseAmount")
+    extra_amount = request.data.get("extraAmount")
+    extra_reason = request.data.get("extraReason")
+
+    # Legacy fields (Phase 1)
     amount = request.data.get("amount")
     currency = request.data.get("currency")
     beneficiary_name = request.data.get("beneficiaryName")
     beneficiary_account = request.data.get("beneficiaryAccount")
     purpose = request.data.get("purpose")
 
-    # Convert amount string to decimal
+    # Convert decimal fields
     try:
-        from decimal import Decimal
-
-        amount = Decimal(str(amount)) if amount else None
-    except (ValueError, TypeError):
+        if amount is not None:
+            amount = Decimal(str(amount))
+        if base_amount is not None:
+            base_amount = Decimal(str(base_amount))
+        if extra_amount is not None:
+            extra_amount = Decimal(str(extra_amount))
+    except (ValueError, TypeError, InvalidOperation):
         return Response(
             {
                 "error": {
@@ -246,15 +263,29 @@ def add_request(request, batchId):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # Ignore client-provided totalAmount (server computes it)
+    # This ensures tamper protection
+    if "totalAmount" in request.data:
+        pass  # Silently ignore - server will compute
+
     try:
         payment_request = services.add_request(
             batchId,
             request.user.id,
-            amount,
-            currency,
-            beneficiary_name,
-            beneficiary_account,
-            purpose,
+            # Legacy fields
+            amount=amount,
+            currency=currency,
+            beneficiary_name=beneficiary_name,
+            beneficiary_account=beneficiary_account,
+            purpose=purpose,
+            # Phase 2 fields
+            entity_type=entity_type,
+            vendor_id=vendor_id,
+            subcontractor_id=subcontractor_id,
+            site_id=site_id,
+            base_amount=base_amount,
+            extra_amount=extra_amount,
+            extra_reason=extra_reason,
             idempotency_key=getattr(request, "idempotency_key", None),
         )
         serializer = PaymentRequestSerializer(payment_request)
@@ -374,6 +405,38 @@ def get_or_update_request(request, batchId, requestId):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticatedReadOnly])
+def get_request(request, requestId):
+    """
+    GET /api/v1/requests/{requestId}
+
+    Get PaymentRequest by ID (standalone endpoint for approval queue).
+    """
+    try:
+        payment_request = (
+            PaymentRequest.objects.select_related(
+                "approval", "approval__approver", "batch"
+            )
+            .prefetch_related("soa_versions")
+            .get(id=requestId)
+        )
+    except PaymentRequest.DoesNotExist:
+        return Response(
+            {
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": f"PaymentRequest {requestId} does not exist",
+                    "details": {},
+                }
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    serializer = PaymentRequestDetailSerializer(payment_request)
+    return Response({"data": serializer.data}, status=status.HTTP_200_OK)
 
 
 @api_view(["GET"])

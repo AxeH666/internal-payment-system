@@ -9,4 +9,7 @@ app_name = "audit"
 
 urlpatterns = [
     path("", views.query_audit_log, name="query-audit-log"),
+    path(
+        "logs", views.query_audit_log, name="query-audit-logs"
+    ),  # Alias for test compatibility
 ]

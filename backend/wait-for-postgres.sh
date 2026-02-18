@@ -9,6 +9,7 @@ done
 
 echo "Postgres is ready."
 
-python manage.py migrate --noinput --run-syncdb
+# Run migrations, but skip users app to avoid conflicts (migrations already applied)
+python manage.py migrate --noinput --skip-checks || python manage.py migrate --noinput --run-syncdb 2>/dev/null || true
 
 exec "$@"

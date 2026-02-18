@@ -2,6 +2,7 @@
 Invariant tests - protect architecture during development.
 Run these tests before and after each implementation step.
 """
+
 from django.test import TestCase
 from apps.payments.models import PaymentRequest
 from decimal import Decimal

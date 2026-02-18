@@ -83,12 +83,16 @@ class PaymentRequest(models.Model):
         PaymentBatch, on_delete=models.PROTECT, related_name="requests"
     )
     amount = models.DecimalField(
-        max_digits=15, decimal_places=2, validators=[MinValueValidator(0.01)]
-    )
+        max_digits=15,
+        decimal_places=2,
+        validators=[MinValueValidator(0.01)],
+        null=True,
+        blank=True,
+    )  # Nullable for ledger-driven (uses total_amount)
     currency = models.CharField(max_length=3)  # ISO 4217 three-letter code
-    beneficiary_name = models.CharField(max_length=255)
-    beneficiary_account = models.CharField(max_length=255)
-    purpose = models.TextField()
+    beneficiary_name = models.CharField(max_length=255, null=True, blank=True)
+    beneficiary_account = models.CharField(max_length=255, null=True, blank=True)
+    purpose = models.TextField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="DRAFT")
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
@@ -104,10 +108,17 @@ class PaymentRequest(models.Model):
     )
     # Phase 2: Ledger-driven payment fields (nullable for legacy compatibility)
     entity_type = models.CharField(
-        max_length=20, choices=[("VENDOR", "Vendor"), ("SUBCONTRACTOR", "Subcontractor")], null=True, blank=True
+        max_length=20,
+        choices=[("VENDOR", "Vendor"), ("SUBCONTRACTOR", "Subcontractor")],
+        null=True,
+        blank=True,
     )
     vendor = models.ForeignKey(
-        "ledger.Vendor", on_delete=models.PROTECT, related_name="payment_requests", null=True, blank=True
+        "ledger.Vendor",
+        on_delete=models.PROTECT,
+        related_name="payment_requests",
+        null=True,
+        blank=True,
     )
     subcontractor = models.ForeignKey(
         "ledger.Subcontractor",
@@ -117,23 +128,41 @@ class PaymentRequest(models.Model):
         blank=True,
     )
     site = models.ForeignKey(
-        "ledger.Site", on_delete=models.PROTECT, related_name="payment_requests", null=True, blank=True
+        "ledger.Site",
+        on_delete=models.PROTECT,
+        related_name="payment_requests",
+        null=True,
+        blank=True,
     )
     # Phase 2: Amount breakdown fields (nullable for legacy compatibility)
     base_amount = models.DecimalField(
-        max_digits=15, decimal_places=2, validators=[MinValueValidator(0.01)], null=True, blank=True
+        max_digits=15,
+        decimal_places=2,
+        validators=[MinValueValidator(0.01)],
+        null=True,
+        blank=True,
     )
     extra_amount = models.DecimalField(
-        max_digits=15, decimal_places=2, validators=[MinValueValidator(0)], null=True, blank=True
+        max_digits=15,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+        null=True,
+        blank=True,
     )
     extra_reason = models.TextField(null=True, blank=True)
     total_amount = models.DecimalField(
-        max_digits=15, decimal_places=2, validators=[MinValueValidator(0.01)], null=True, blank=True
+        max_digits=15,
+        decimal_places=2,
+        validators=[MinValueValidator(0.01)],
+        null=True,
+        blank=True,
     )
     # Phase 2: Snapshot fields for historical preservation (nullable for legacy)
     vendor_snapshot_name = models.CharField(max_length=255, null=True, blank=True)
     site_snapshot_code = models.CharField(max_length=100, null=True, blank=True)
-    subcontractor_snapshot_name = models.CharField(max_length=255, null=True, blank=True)
+    subcontractor_snapshot_name = models.CharField(
+        max_length=255, null=True, blank=True
+    )
     # Phase 2: Version locking and execution tracking
     version = models.IntegerField(default=1)
     execution_id = models.UUIDField(null=True, blank=True, db_index=True)
@@ -160,24 +189,41 @@ class PaymentRequest(models.Model):
             # Phase 2: Legacy vs LedgerDriven mutual exclusivity
             models.CheckConstraint(
                 check=models.Q(
-                    (models.Q(entity_type__isnull=True) & models.Q(beneficiary_name__isnull=False))
-                    | (models.Q(entity_type__isnull=False) & models.Q(beneficiary_name__isnull=True))
+                    (
+                        models.Q(entity_type__isnull=True)
+                        & models.Q(beneficiary_name__isnull=False)
+                    )
+                    | (
+                        models.Q(entity_type__isnull=False)
+                        & models.Q(beneficiary_name__isnull=True)
+                    )
                 ),
                 name="legacy_or_ledger_exclusive",
             ),
             # Phase 2: Vendor/Subcontractor FK exclusivity
             models.CheckConstraint(
                 check=models.Q(
-                    (models.Q(vendor_id__isnull=False) & models.Q(subcontractor_id__isnull=True))
-                    | (models.Q(vendor_id__isnull=True) & models.Q(subcontractor_id__isnull=False))
-                    | (models.Q(vendor_id__isnull=True) & models.Q(subcontractor_id__isnull=True))  # legacy
+                    (
+                        models.Q(vendor_id__isnull=False)
+                        & models.Q(subcontractor_id__isnull=True)
+                    )
+                    | (
+                        models.Q(vendor_id__isnull=True)
+                        & models.Q(subcontractor_id__isnull=False)
+                    )
+                    | (
+                        models.Q(vendor_id__isnull=True)
+                        & models.Q(subcontractor_id__isnull=True)
+                    )  # legacy
                 ),
                 name="vendor_or_subcontractor_exclusive",
             ),
             # Phase 2: total_amount integrity (when not null)
             models.CheckConstraint(
                 check=models.Q(total_amount__isnull=True)
-                | models.Q(total_amount=models.F("base_amount") + models.F("extra_amount")),
+                | models.Q(
+                    total_amount=models.F("base_amount") + models.F("extra_amount")
+                ),
                 name="total_amount_integrity",
             ),
         ]
@@ -190,9 +236,14 @@ class PaymentRequest(models.Model):
         ]
 
     def __str__(self):
-        return (
-            f"{self.beneficiary_name} - {self.amount} {self.currency} ({self.status})"
+        name = (
+            self.beneficiary_name
+            or self.vendor_snapshot_name
+            or self.subcontractor_snapshot_name
+            or "Unknown"
         )
+        amt = self.amount or self.total_amount or 0
+        return f"{name} - {amt} {self.currency} ({self.status})"
 
 
 class ApprovalRecord(models.Model):
