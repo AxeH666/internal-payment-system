@@ -50,3 +50,37 @@ class RequestIDMiddleware:
         response = self.get_response(request)
         response[self.RESPONSE_HEADER] = request_id
         return response
+
+
+class IdempotencyKeyMiddleware:
+    """Enforce idempotency key requirement on mutation endpoints."""
+
+    MUTATION_METHODS = ["POST", "PATCH", "PUT"]
+    EXCLUDED_PATHS = ["/api/v1/auth/login", "/api/health/"]
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if request.method in self.MUTATION_METHODS:
+            if not any(
+                request.path.startswith(excluded) for excluded in self.EXCLUDED_PATHS
+            ):
+                idempotency_key = request.headers.get("Idempotency-Key")
+                if not idempotency_key:
+                    from rest_framework.response import Response
+                    from rest_framework import status
+
+                    return Response(
+                        {
+                            "error": {
+                                "code": "VALIDATION_ERROR",
+                                "message": "Idempotency-Key header is required for mutation operations",
+                                "details": {},
+                            }
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                request.idempotency_key = idempotency_key
+
+        return self.get_response(request)
