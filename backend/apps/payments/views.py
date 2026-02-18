@@ -255,6 +255,7 @@ def add_request(request, batchId):
             beneficiary_name,
             beneficiary_account,
             purpose,
+            idempotency_key=getattr(request, "idempotency_key", None),
         )
         serializer = PaymentRequestSerializer(payment_request)
         return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
@@ -434,7 +435,12 @@ def approve_request(request, requestId):
     comment = serializer.validated_data.get("comment")
 
     try:
-        payment_request = services.approve_request(requestId, request.user.id, comment)
+        payment_request = services.approve_request(
+            requestId,
+            request.user.id,
+            comment,
+            idempotency_key=getattr(request, "idempotency_key", None),
+        )
         detail_serializer = PaymentRequestDetailSerializer(payment_request)
         return Response({"data": detail_serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
@@ -466,7 +472,12 @@ def reject_request(request, requestId):
     comment = serializer.validated_data.get("comment")
 
     try:
-        payment_request = services.reject_request(requestId, request.user.id, comment)
+        payment_request = services.reject_request(
+            requestId,
+            request.user.id,
+            comment,
+            idempotency_key=getattr(request, "idempotency_key", None),
+        )
         detail_serializer = PaymentRequestDetailSerializer(payment_request)
         return Response({"data": detail_serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
@@ -493,7 +504,11 @@ def mark_paid(request, requestId):
     Mark a PaymentRequest as PAID (APPROVED only).
     """
     try:
-        payment_request = services.mark_paid(requestId, request.user.id)
+        payment_request = services.mark_paid(
+            requestId,
+            request.user.id,
+            idempotency_key=getattr(request, "idempotency_key", None),
+        )
         detail_serializer = PaymentRequestDetailSerializer(payment_request)
         return Response({"data": detail_serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
