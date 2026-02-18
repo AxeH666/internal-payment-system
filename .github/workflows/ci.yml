@@ -93,7 +93,7 @@ jobs:
         run: |
           curl -s http://localhost:8000/api/health/ | grep '"status": "ok"'
           curl -s http://localhost:8000/api/health/ | grep '"database": "connected"'
-          curl -s http://localhost:8000/api/health/ | grep '"architecture_version": "v0.1.0"'
+          curl -s http://localhost:8000/api/health/ | grep '"architecture_version": "v0.2.0"'
 
       - name: Create user
         run: |

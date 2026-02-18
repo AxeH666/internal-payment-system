@@ -10,7 +10,7 @@ def health_check(request):
             {
                 "status": "ok",
                 "database": "connected",
-                "architecture_version": "v0.1.0",
+                "architecture_version": "v0.2.0",
             },
             status=200,
         )
@@ -19,7 +19,7 @@ def health_check(request):
             {
                 "status": "unhealthy",
                 "database": "disconnected",
-                "architecture_version": "v0.1.0",
+                "architecture_version": "v0.2.0",
             },
             status=503,
         )

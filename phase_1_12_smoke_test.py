@@ -38,7 +38,7 @@ def validate_health(payload):
     print("\n🔎 Validating health payload")
     assert payload["status"] == "ok"
     assert payload["database"] == "connected"
-    assert payload["architecture_version"] == "v0.1.0"
+    assert payload["architecture_version"] == "v0.2.0"
     print("✅ Health valid")
 
 
