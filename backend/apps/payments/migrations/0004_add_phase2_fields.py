@@ -2,7 +2,7 @@
 
 from django.db import migrations, models
 import django.core.validators
-import uuid
+import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
@@ -15,46 +15,50 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddField(
             model_name="paymentrequest",
+            name="entity_type",
             field=models.CharField(
                 blank=True,
                 choices=[("VENDOR", "Vendor"), ("SUBCONTRACTOR", "Subcontractor")],
                 max_length=20,
                 null=True,
             ),
-            preserve_default=False,
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="vendor",
             field=models.ForeignKey(
                 blank=True,
                 null=True,
-                on_delete=models.PROTECT,
+                on_delete=django.db.models.deletion.PROTECT,
                 related_name="payment_requests",
                 to="ledger.vendor",
             ),
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="subcontractor",
             field=models.ForeignKey(
                 blank=True,
                 null=True,
-                on_delete=models.PROTECT,
+                on_delete=django.db.models.deletion.PROTECT,
                 related_name="payment_requests",
                 to="ledger.subcontractor",
             ),
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="site",
             field=models.ForeignKey(
                 blank=True,
                 null=True,
-                on_delete=models.PROTECT,
+                on_delete=django.db.models.deletion.PROTECT,
                 related_name="payment_requests",
                 to="ledger.site",
             ),
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="base_amount",
             field=models.DecimalField(
                 blank=True,
                 decimal_places=2,
@@ -65,6 +69,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="extra_amount",
             field=models.DecimalField(
                 blank=True,
                 decimal_places=2,
@@ -75,10 +80,12 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="extra_reason",
             field=models.TextField(blank=True, null=True),
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="total_amount",
             field=models.DecimalField(
                 blank=True,
                 decimal_places=2,
@@ -89,22 +96,27 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="vendor_snapshot_name",
             field=models.CharField(blank=True, max_length=255, null=True),
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="site_snapshot_code",
             field=models.CharField(blank=True, max_length=100, null=True),
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="subcontractor_snapshot_name",
             field=models.CharField(blank=True, max_length=255, null=True),
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="version",
             field=models.IntegerField(default=1),
         ),
         migrations.AddField(
             model_name="paymentrequest",
+            name="execution_id",
             field=models.UUIDField(blank=True, db_index=True, null=True),
         ),
         migrations.AddIndex(
