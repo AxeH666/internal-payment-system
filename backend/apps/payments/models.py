@@ -157,6 +157,29 @@ class PaymentRequest(models.Model):
             models.CheckConstraint(
                 check=models.Q(amount__gt=0), name="amount_positive"
             ),
+            # Phase 2: Legacy vs LedgerDriven mutual exclusivity
+            models.CheckConstraint(
+                check=models.Q(
+                    (models.Q(entity_type__isnull=True) & models.Q(beneficiary_name__isnull=False))
+                    | (models.Q(entity_type__isnull=False) & models.Q(beneficiary_name__isnull=True))
+                ),
+                name="legacy_or_ledger_exclusive",
+            ),
+            # Phase 2: Vendor/Subcontractor FK exclusivity
+            models.CheckConstraint(
+                check=models.Q(
+                    (models.Q(vendor_id__isnull=False) & models.Q(subcontractor_id__isnull=True))
+                    | (models.Q(vendor_id__isnull=True) & models.Q(subcontractor_id__isnull=False))
+                    | (models.Q(vendor_id__isnull=True) & models.Q(subcontractor_id__isnull=True))  # legacy
+                ),
+                name="vendor_or_subcontractor_exclusive",
+            ),
+            # Phase 2: total_amount integrity (when not null)
+            models.CheckConstraint(
+                check=models.Q(total_amount__isnull=True)
+                | models.Q(total_amount=models.F("base_amount") + models.F("extra_amount")),
+                name="total_amount_integrity",
+            ),
         ]
         indexes = [
             models.Index(fields=["batch"], name="idx_request_batch"),

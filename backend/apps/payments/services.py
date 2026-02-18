@@ -28,7 +28,9 @@ from apps.payments.state_machine import (
     validate_transition,
     is_closed_batch,
 )
+from apps.payments.versioning import version_locked_update
 from apps.audit.services import create_audit_entry
+from django.db import connection
 
 
 def create_batch(creator_id, title):
@@ -399,6 +401,12 @@ def update_request(request_id, batch_id, creator_id, **fields):
     if request.status != "DRAFT":
         raise InvalidStateError(f"Cannot update request with status {request.status}")
 
+    # Phase 2: Immutable financial lock - block modifications when APPROVED/PAID
+    if request.status in ("APPROVED", "PAID"):
+        raise InvalidStateError(
+            "Financial fields are locked when request is APPROVED or PAID"
+        )
+
     # Check batch state
     if is_closed_batch(request.batch.status):
         raise InvalidStateError("Cannot update request in closed batch")
@@ -719,6 +727,10 @@ def approve_request(request_id, approver_id, comment=None):
         return request
 
     with transaction.atomic():
+        # Set transaction isolation level for financial operations
+        with connection.cursor() as cursor:
+            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+
         # Create ApprovalRecord
         ApprovalRecord.objects.create(
             payment_request=request,
@@ -727,11 +739,22 @@ def approve_request(request_id, approver_id, comment=None):
             comment=comment.strip() if comment else None,
         )
 
-        # Transition request to APPROVED
+        # Transition request to APPROVED with version locking
         validate_transition("PaymentRequest", request.status, "APPROVED")
-        request.status = "APPROVED"
-        request.updated_by = approver
-        request.save()
+        current_version = request.version
+        updated_count = version_locked_update(
+            PaymentRequest.objects.filter(
+                id=request_id, status="PENDING_APPROVAL", version=current_version
+            ),
+            current_version=current_version,
+            status="APPROVED",
+            updated_by=approver,
+        )
+        if updated_count == 0:
+            raise InvalidStateError(
+                "Concurrent modification detected or invalid state for approval"
+            )
+        request.refresh_from_db()
 
         # Create audit entry
         create_audit_entry(
@@ -793,6 +816,10 @@ def reject_request(request_id, approver_id, comment=None):
         return request
 
     with transaction.atomic():
+        # Set transaction isolation level for financial operations
+        with connection.cursor() as cursor:
+            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+
         # Create ApprovalRecord
         ApprovalRecord.objects.create(
             payment_request=request,
@@ -801,11 +828,22 @@ def reject_request(request_id, approver_id, comment=None):
             comment=comment.strip() if comment else None,
         )
 
-        # Transition request to REJECTED
+        # Transition request to REJECTED with version locking
         validate_transition("PaymentRequest", request.status, "REJECTED")
-        request.status = "REJECTED"
-        request.updated_by = approver
-        request.save()
+        current_version = request.version
+        updated_count = version_locked_update(
+            PaymentRequest.objects.filter(
+                id=request_id, status="PENDING_APPROVAL", version=current_version
+            ),
+            current_version=current_version,
+            status="REJECTED",
+            updated_by=approver,
+        )
+        if updated_count == 0:
+            raise InvalidStateError(
+                "Concurrent modification detected or invalid state for rejection"
+            )
+        request.refresh_from_db()
 
         # Create audit entry
         create_audit_entry(
@@ -864,11 +902,26 @@ def mark_paid(request_id, actor_id):
         )
 
     with transaction.atomic():
-        # Transition request to PAID
+        # Set transaction isolation level for financial operations
+        with connection.cursor() as cursor:
+            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+
+        # Transition request to PAID with version locking
         validate_transition("PaymentRequest", request.status, "PAID")
-        request.status = "PAID"
-        request.updated_by = actor
-        request.save()
+        current_version = request.version
+        updated_count = version_locked_update(
+            PaymentRequest.objects.filter(
+                id=request_id, status="APPROVED", version=current_version
+            ),
+            current_version=current_version,
+            status="PAID",
+            updated_by=actor,
+        )
+        if updated_count == 0:
+            raise InvalidStateError(
+                "Concurrent modification detected or invalid state for mark_paid"
+            )
+        request.refresh_from_db()
 
         # Create audit entry
         create_audit_entry(
