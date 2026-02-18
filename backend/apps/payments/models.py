@@ -217,3 +217,28 @@ class SOAVersion(models.Model):
 
     def __str__(self):
         return f"SOA v{self.version_number} for {self.payment_request}"
+
+
+class IdempotencyKey(models.Model):
+    """Idempotency key for preventing duplicate financial operations."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.CharField(max_length=255, db_index=True)
+    operation = models.CharField(max_length=100)
+    target_object_id = models.UUIDField(null=True)
+    response_code = models.IntegerField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "idempotency_keys"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["key", "operation"], name="unique_idempotency_per_operation"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["key"], name="idx_idempotency_key"),
+        ]
+
+    def __str__(self):
+        return f"{self.operation}:{self.key}"
