@@ -77,34 +77,67 @@ def create_batch(creator_id, title):
 def add_request(
     batch_id,
     creator_id,
-    amount,
-    currency,
-    beneficiary_name,
-    beneficiary_account,
-    purpose,
+    amount=None,
+    currency=None,
+    beneficiary_name=None,
+    beneficiary_account=None,
+    purpose=None,
+    # Phase 2: Ledger-driven fields
+    entity_type=None,
+    vendor_id=None,
+    subcontractor_id=None,
+    site_id=None,
+    base_amount=None,
+    extra_amount=None,
+    extra_reason=None,
+    idempotency_key=None,
 ):
     """
     Add a PaymentRequest to a PaymentBatch.
+    Supports both legacy (Phase 1) and ledger-driven (Phase 2) creation.
 
     Args:
         batch_id: PaymentBatch identifier
         creator_id: User identifier (must be batch creator)
-        amount: Positive decimal amount
+        # Legacy fields (Phase 1)
+        amount: Positive decimal amount (legacy)
         currency: Three-letter currency code
-        beneficiary_name: Recipient name
-        beneficiary_account: Account identifier
-        purpose: Payment purpose
+        beneficiary_name: Recipient name (legacy)
+        beneficiary_account: Account identifier (legacy)
+        purpose: Payment purpose (legacy)
+        # Phase 2: Ledger-driven fields
+        entity_type: "VENDOR" or "SUBCONTRACTOR" (required for ledger-driven)
+        vendor_id: Vendor UUID (required if entity_type=VENDOR)
+        subcontractor_id: Subcontractor UUID (required if entity_type=SUBCONTRACTOR)
+        site_id: Site UUID (required for ledger-driven)
+        base_amount: Positive decimal (required for ledger-driven)
+        extra_amount: Non-negative decimal (default 0)
+        extra_reason: Required if extra_amount > 0
+        idempotency_key: Optional idempotency key for retry safety
 
     Returns:
         PaymentRequest: Created request
 
     Raises:
-        NotFoundError: If batch or creator does not exist
+        NotFoundError: If batch, creator, or ledger entities do not exist
         InvalidStateError: If batch is not DRAFT
         PermissionDeniedError: If creator is not batch creator
         ValidationError: If validation fails
     """
     from apps.users.models import User
+    from apps.ledger.models import Vendor, Subcontractor, Site
+    from apps.payments.models import IdempotencyKey
+
+    # Idempotency check
+    if idempotency_key:
+        existing_key = IdempotencyKey.objects.filter(
+            key=idempotency_key, operation="CREATE_PAYMENT_REQUEST"
+        ).first()
+        if existing_key and existing_key.target_object_id:
+            try:
+                return PaymentRequest.objects.get(id=existing_key.target_object_id)
+            except PaymentRequest.DoesNotExist:
+                pass  # Key exists but object missing, proceed with creation
 
     try:
         batch = PaymentBatch.objects.select_for_update().get(id=batch_id)
@@ -129,48 +162,194 @@ def add_request(
     if is_closed_batch(batch.status):
         raise InvalidStateError("Cannot add request to closed batch")
 
-    # Validate request data
-    if not amount or amount <= 0:
-        raise ValidationError("Amount must be positive")
+    # Determine if legacy or ledger-driven
+    is_ledger_driven = entity_type is not None
 
-    if not currency or len(currency) != 3:
-        raise ValidationError("Currency must be a three-letter code")
+    if is_ledger_driven:
+        # Phase 2: Ledger-driven validation
+        if entity_type not in ("VENDOR", "SUBCONTRACTOR"):
+            raise ValidationError("entity_type must be VENDOR or SUBCONTRACTOR")
 
-    if not beneficiary_name or not beneficiary_name.strip():
-        raise ValidationError("Beneficiary name must be non-empty")
+        if entity_type == "VENDOR":
+            if not vendor_id:
+                raise ValidationError("vendor_id is required when entity_type=VENDOR")
+            if subcontractor_id:
+                raise ValidationError(
+                    "Cannot specify both vendor_id and subcontractor_id"
+                )
+            try:
+                vendor = Vendor.objects.select_for_update().get(
+                    id=vendor_id, is_active=True
+                )
+            except Vendor.DoesNotExist:
+                raise NotFoundError(f"Active Vendor {vendor_id} does not exist")
+            entity_obj = vendor
+            entity_name = vendor.name
+        else:  # SUBCONTRACTOR
+            if not subcontractor_id:
+                raise ValidationError(
+                    "subcontractor_id is required when entity_type=SUBCONTRACTOR"
+                )
+            if vendor_id:
+                raise ValidationError(
+                    "Cannot specify both vendor_id and subcontractor_id"
+                )
+            try:
+                subcontractor = Subcontractor.objects.select_for_update().get(
+                    id=subcontractor_id, is_active=True
+                )
+            except Subcontractor.DoesNotExist:
+                raise NotFoundError(
+                    f"Active Subcontractor {subcontractor_id} does not exist"
+                )
+            entity_obj = subcontractor
+            entity_name = subcontractor.name
 
-    if not beneficiary_account or not beneficiary_account.strip():
-        raise ValidationError("Beneficiary account must be non-empty")
+        if not site_id:
+            raise ValidationError("site_id is required for ledger-driven requests")
+        try:
+            site = Site.objects.select_for_update().get(id=site_id, is_active=True)
+        except Site.DoesNotExist:
+            raise NotFoundError(f"Active Site {site_id} does not exist")
 
-    if not purpose or not purpose.strip():
-        raise ValidationError("Purpose must be non-empty")
+        # Amount validation
+        if base_amount is None or base_amount <= 0:
+            raise ValidationError("base_amount must be positive")
+        if extra_amount is None:
+            extra_amount = 0
+        if extra_amount < 0:
+            raise ValidationError("extra_amount must be non-negative")
+        if extra_amount > 0 and not extra_reason:
+            raise ValidationError("extra_reason is required when extra_amount > 0")
+
+        # Compute total server-side
+        total_amount = base_amount + extra_amount
+
+        # Soft guidance: subcontractor site override warning
+        if (
+            entity_type == "SUBCONTRACTOR"
+            and subcontractor.assigned_site_id
+            and str(site_id) != str(subcontractor.assigned_site_id)
+        ):
+            # Create audit warning entry
+            create_audit_entry(
+                event_type="SUBCONTRACTOR_SITE_OVERRIDE",
+                actor_id=creator_id,
+                entity_type="PaymentRequest",
+                entity_id=None,  # Will be set after creation
+                previous_state={
+                    "assigned_site_id": str(subcontractor.assigned_site_id),
+                    "assigned_site_code": subcontractor.assigned_site.code,
+                },
+                new_state={
+                    "selected_site_id": str(site_id),
+                    "selected_site_code": site.code,
+                },
+            )
+
+        # Validate currency
+        if not currency or len(currency) != 3:
+            raise ValidationError("Currency must be a three-letter code")
+
+        # Populate snapshots (mandatory for ledger-driven)
+        vendor_snapshot_name = vendor.name if entity_type == "VENDOR" else None
+        subcontractor_snapshot_name = (
+            subcontractor.name if entity_type == "SUBCONTRACTOR" else None
+        )
+        site_snapshot_code = site.code
+
+    else:
+        # Phase 1: Legacy validation
+        if not amount or amount <= 0:
+            raise ValidationError("Amount must be positive")
+        if not currency or len(currency) != 3:
+            raise ValidationError("Currency must be a three-letter code")
+        if not beneficiary_name or not beneficiary_name.strip():
+            raise ValidationError("Beneficiary name must be non-empty")
+        if not beneficiary_account or not beneficiary_account.strip():
+            raise ValidationError("Beneficiary account must be non-empty")
+        if not purpose or not purpose.strip():
+            raise ValidationError("Purpose must be non-empty")
 
     with transaction.atomic():
-        request = PaymentRequest.objects.create(
-            batch=batch,
-            amount=amount,
-            currency=currency.upper().strip(),
-            beneficiary_name=beneficiary_name.strip(),
-            beneficiary_account=beneficiary_account.strip(),
-            purpose=purpose.strip(),
-            created_by=creator,
-            status="DRAFT",
-        )
+        # Create request
+        request_data = {
+            "batch": batch,
+            "currency": currency.upper().strip(),
+            "created_by": creator,
+            "status": "DRAFT",
+        }
+
+        if is_ledger_driven:
+            request_data.update(
+                {
+                    "entity_type": entity_type,
+                    "vendor": vendor if entity_type == "VENDOR" else None,
+                    "subcontractor": (
+                        subcontractor if entity_type == "SUBCONTRACTOR" else None
+                    ),
+                    "site": site,
+                    "base_amount": base_amount,
+                    "extra_amount": extra_amount,
+                    "extra_reason": extra_reason.strip() if extra_reason else None,
+                    "total_amount": total_amount,
+                    "vendor_snapshot_name": vendor_snapshot_name,
+                    "subcontractor_snapshot_name": subcontractor_snapshot_name,
+                    "site_snapshot_code": site_snapshot_code,
+                }
+            )
+        else:
+            request_data.update(
+                {
+                    "amount": amount,
+                    "beneficiary_name": beneficiary_name.strip(),
+                    "beneficiary_account": beneficiary_account.strip(),
+                    "purpose": purpose.strip(),
+                }
+            )
+
+        request = PaymentRequest.objects.create(**request_data)
+
+        # Store idempotency key if provided
+        if idempotency_key:
+            IdempotencyKey.objects.create(
+                key=idempotency_key,
+                operation="CREATE_PAYMENT_REQUEST",
+                target_object_id=request.id,
+                response_code=201,
+            )
 
         # Create audit entry
-        create_audit_entry(
-            event_type="REQUEST_CREATED",
-            actor_id=creator_id,
-            entity_type="PaymentRequest",
-            entity_id=request.id,
-            previous_state=None,
-            new_state={
-                "status": "DRAFT",
-                "amount": str(request.amount),
-                "currency": request.currency,
-                "beneficiary_name": request.beneficiary_name,
-            },
-        )
+        if is_ledger_driven:
+            create_audit_entry(
+                event_type="REQUEST_CREATED",
+                actor_id=creator_id,
+                entity_type="PaymentRequest",
+                entity_id=request.id,
+                previous_state=None,
+                new_state={
+                    "status": "DRAFT",
+                    "entity_type": entity_type,
+                    "entity_name": entity_name,
+                    "site_code": site_snapshot_code,
+                    "total_amount": str(total_amount),
+                    "currency": request.currency,
+                },
+            )
+        else:
+            create_audit_entry(
+                event_type="REQUEST_CREATED",
+                actor_id=creator_id,
+                entity_type="PaymentRequest",
+                entity_id=request.id,
+                previous_state=None,
+                new_state={
+                    "status": "DRAFT",
+                    "amount": str(request.amount),
+                    "currency": request.currency,
+                    "beneficiary_name": request.beneficiary_name,
+                },
+            )
 
         return request
 
@@ -336,22 +515,35 @@ def submit_batch(batch_id, creator_id):
     if not requests:
         raise PreconditionFailedError("Batch must contain at least one payment request")
 
-    # Validate all requests are DRAFT
+        # Validate all requests are DRAFT
     for req in requests:
         if req.status != "DRAFT":
             raise InvalidStateError(
                 f"All requests must be DRAFT. Request {req.id} has status {req.status}"
             )
 
-        # Validate request data
-        if req.amount <= 0:
-            raise PreconditionFailedError(f"Request {req.id} has invalid amount")
+        # Validate request data (support both legacy and ledger-driven)
+        if req.entity_type:
+            # Ledger-driven validation
+            if not req.total_amount or req.total_amount <= 0:
+                raise PreconditionFailedError(
+                    f"Request {req.id} has invalid total_amount"
+                )
+            if not req.site_id:
+                raise PreconditionFailedError(
+                    f"Request {req.id} is missing site (ledger-driven)"
+                )
+        else:
+            # Legacy validation
+            if req.amount <= 0:
+                raise PreconditionFailedError(f"Request {req.id} has invalid amount")
+            if not req.beneficiary_name or not req.beneficiary_account or not req.purpose:
+                raise PreconditionFailedError(
+                    f"Request {req.id} has missing required fields"
+                )
+
         if not req.currency or len(req.currency) != 3:
             raise PreconditionFailedError(f"Request {req.id} has invalid currency")
-        if not req.beneficiary_name or not req.beneficiary_account or not req.purpose:
-            raise PreconditionFailedError(
-                f"Request {req.id} has missing required fields"
-            )
 
     with transaction.atomic():
         # Update batch
