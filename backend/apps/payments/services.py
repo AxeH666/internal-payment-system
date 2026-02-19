@@ -646,29 +646,28 @@ def cancel_batch(batch_id, creator_id):
     from apps.users.models import User, Role
 
     try:
-        batch = PaymentBatch.objects.select_for_update().get(id=batch_id)
-    except PaymentBatch.DoesNotExist:
-        raise NotFoundError(f"PaymentBatch {batch_id} does not exist")
-
-    try:
         creator = User.objects.get(id=creator_id)
     except User.DoesNotExist:
         raise NotFoundError(f"User {creator_id} does not exist")
     # Ensure creator existence is enforced even if not otherwise referenced.
     creator.pk
 
-    # Check ownership
-    if creator.role != Role.ADMIN and batch.created_by_id != creator_id:
-        raise PermissionDeniedError("Only the batch creator can cancel the batch")
-
-    # Check batch state
-    if batch.status != "DRAFT":
-        # Idempotency: if already CANCELLED, return success
-        if batch.status == "CANCELLED":
-            return batch
-        raise InvalidStateError(f"Cannot cancel batch with status {batch.status}")
-
     with transaction.atomic():
+        try:
+            batch = PaymentBatch.objects.select_for_update().get(id=batch_id)
+        except PaymentBatch.DoesNotExist:
+            raise NotFoundError(f"PaymentBatch {batch_id} does not exist")
+
+        # Check ownership
+        if creator.role != Role.ADMIN and batch.created_by_id != creator_id:
+            raise PermissionDeniedError("Only the batch creator can cancel the batch")
+
+        # Check batch state
+        if batch.status != "DRAFT":
+            # Idempotency: if already CANCELLED, return success
+            if batch.status == "CANCELLED":
+                return batch
+            raise InvalidStateError(f"Cannot cancel batch with status {batch.status}")
         now = timezone.now()
         batch.status = "CANCELLED"
         batch.completed_at = now
@@ -833,11 +832,6 @@ def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
                 pass  # Key exists but object missing, proceed with rejection
 
     try:
-        request = PaymentRequest.objects.select_for_update().get(id=request_id)
-    except PaymentRequest.DoesNotExist:
-        raise NotFoundError(f"PaymentRequest {request_id} does not exist")
-
-    try:
         approver = User.objects.get(id=approver_id)
     except User.DoesNotExist:
         raise NotFoundError(f"User {approver_id} does not exist")
@@ -848,22 +842,29 @@ def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
             "Only users with APPROVER or ADMIN role can reject requests"
         )
 
-    # Check request state
-    if request.status != "PENDING_APPROVAL":
-        # Idempotency: if already REJECTED, return success
-        if request.status == "REJECTED":
-            return request
-        raise InvalidStateError(f"Cannot reject request with status {request.status}")
-
-    # Check if ApprovalRecord already exists
-    if hasattr(request, "approval"):
-        # Idempotency: return success without duplicate
-        return request
-
     with transaction.atomic():
         # Set transaction isolation level for financial operations
         with connection.cursor() as cursor:
             cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+
+        try:
+            request = PaymentRequest.objects.select_for_update().get(id=request_id)
+        except PaymentRequest.DoesNotExist:
+            raise NotFoundError(f"PaymentRequest {request_id} does not exist")
+
+        # Check request state
+        if request.status != "PENDING_APPROVAL":
+            # Idempotency: if already REJECTED, return success
+            if request.status == "REJECTED":
+                return request
+            raise InvalidStateError(
+                f"Cannot reject request with status {request.status}"
+            )
+
+        # Check if ApprovalRecord already exists
+        if hasattr(request, "approval"):
+            # Idempotency: return success without duplicate
+            return request
 
         # Create ApprovalRecord
         ApprovalRecord.objects.create(
@@ -944,11 +945,6 @@ def mark_paid(request_id, actor_id, idempotency_key=None):
                 pass  # Key exists but object missing, proceed with mark_paid
 
     try:
-        request = PaymentRequest.objects.select_for_update().get(id=request_id)
-    except PaymentRequest.DoesNotExist:
-        raise NotFoundError(f"PaymentRequest {request_id} does not exist")
-
-    try:
         actor = User.objects.get(id=actor_id)
     except User.DoesNotExist:
         raise NotFoundError(f"User {actor_id} does not exist")
@@ -959,19 +955,24 @@ def mark_paid(request_id, actor_id, idempotency_key=None):
             "Only CREATOR or APPROVER can mark requests as paid"
         )
 
-    # Check request state
-    if request.status != "APPROVED":
-        # Idempotency: if already PAID, return success
-        if request.status == "PAID":
-            return request
-        raise InvalidStateError(
-            f"Cannot mark paid request with status {request.status}"
-        )
-
     with transaction.atomic():
         # Set transaction isolation level for financial operations
         with connection.cursor() as cursor:
             cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+
+        try:
+            request = PaymentRequest.objects.select_for_update().get(id=request_id)
+        except PaymentRequest.DoesNotExist:
+            raise NotFoundError(f"PaymentRequest {request_id} does not exist")
+
+        # Check request state
+        if request.status != "APPROVED":
+            # Idempotency: if already PAID, return success
+            if request.status == "PAID":
+                return request
+            raise InvalidStateError(
+                f"Cannot mark paid request with status {request.status}"
+            )
 
         # Transition request to PAID with version locking
         validate_transition("PaymentRequest", request.status, "PAID")
@@ -1066,38 +1067,37 @@ def upload_soa(batch_id, request_id, creator_id, file):
     from django.core.files.base import ContentFile
 
     try:
-        request = PaymentRequest.objects.select_for_update().get(id=request_id)
-    except PaymentRequest.DoesNotExist:
-        raise NotFoundError(f"PaymentRequest {request_id} does not exist")
-
-    if str(request.batch_id) != str(batch_id):
-        raise NotFoundError(
-            f"PaymentRequest {request_id} does not belong to batch {batch_id}"
-        )
-
-    try:
         creator = User.objects.get(id=creator_id)
     except User.DoesNotExist:
         raise NotFoundError(f"User {creator_id} does not exist")
-
-    # Check ownership
-    if creator.role != Role.ADMIN and request.batch.created_by_id != creator_id:
-        raise PermissionDeniedError("Only the batch creator can upload SOA")
-
-    # Check request state
-    if request.status != "DRAFT":
-        raise InvalidStateError(
-            f"Cannot upload SOA for request with status {request.status}"
-        )
-
-    # Check batch state
-    if is_closed_batch(request.batch.status):
-        raise InvalidStateError("Cannot upload SOA for request in closed batch")
 
     if not file:
         raise ValidationError("File is required")
 
     with transaction.atomic():
+        try:
+            request = PaymentRequest.objects.select_for_update().get(id=request_id)
+        except PaymentRequest.DoesNotExist:
+            raise NotFoundError(f"PaymentRequest {request_id} does not exist")
+
+        if str(request.batch_id) != str(batch_id):
+            raise NotFoundError(
+                f"PaymentRequest {request_id} does not belong to batch {batch_id}"
+            )
+
+        # Check ownership
+        if creator.role != Role.ADMIN and request.batch.created_by_id != creator_id:
+            raise PermissionDeniedError("Only the batch creator can upload SOA")
+
+        # Check request state
+        if request.status != "DRAFT":
+            raise InvalidStateError(
+                f"Cannot upload SOA for request with status {request.status}"
+            )
+
+        # Check batch state
+        if is_closed_batch(request.batch.status):
+            raise InvalidStateError("Cannot upload SOA for request in closed batch")
         # Calculate next version number
         existing_versions = SOAVersion.objects.filter(payment_request=request).order_by(
             "-version_number"
