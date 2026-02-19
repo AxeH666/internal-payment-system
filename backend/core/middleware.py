@@ -74,7 +74,7 @@ class IdempotencyKeyMiddleware:
                         {
                             "error": {
                                 "code": "VALIDATION_ERROR",
-                                "message": "Idempotency-Key header is required for mutation operations",
+                                "message": "Idempotency-Key required",
                                 "details": {},
                             }
                         },

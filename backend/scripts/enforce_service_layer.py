@@ -3,7 +3,6 @@ Engineering audit: Enforce service layer pattern.
 Scans code and fails if PaymentRequest model operations detected outside services.py
 """
 
-import ast
 import sys
 from pathlib import Path
 

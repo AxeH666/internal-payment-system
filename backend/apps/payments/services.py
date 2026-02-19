@@ -285,7 +285,8 @@ def add_request(
         if is_ledger_driven:
             request_data.update(
                 {
-                    "amount": total_amount,  # Legacy amount field for display/constraints
+                    # Legacy amount field for display/constraints
+                    "amount": total_amount,
                     "entity_type": entity_type,
                     "vendor": vendor if entity_type == "VENDOR" else None,
                     "subcontractor": (
@@ -379,14 +380,14 @@ def update_request(request_id, batch_id, creator_id, **fields):
     """
     from apps.users.models import User, Role
 
-    # select_for_update() requires an active transaction (Django raises TransactionManagementError otherwise)
+    # select_for_update() requires an active transaction
     with transaction.atomic():
         try:
             request = PaymentRequest.objects.select_for_update().get(id=request_id)
         except PaymentRequest.DoesNotExist:
             raise NotFoundError(f"PaymentRequest {request_id} does not exist")
 
-    # Check request state first (before any request.batch access) so PATCH after approve returns 409
+    # Check request state first so PATCH after approve returns 409
     if request.status != "DRAFT":
         raise InvalidStateError(f"Cannot update request with status {request.status}")
 
@@ -529,7 +530,8 @@ def submit_batch(batch_id, creator_id):
         for req in requests:
             if req.status != "DRAFT":
                 raise InvalidStateError(
-                    f"All requests must be DRAFT. Request {req.id} has status {req.status}"
+                    f"All requests must be DRAFT. Request {req.id} has "
+                    f"status {req.status}"
                 )
 
             # Validate request data (support both legacy and ledger-driven)
@@ -927,7 +929,7 @@ def mark_paid(request_id, actor_id, idempotency_key=None):
         InvalidStateError: If request is not APPROVED
         PermissionDeniedError: If actor does not have required role
     """
-    from apps.users.models import User, Role
+    from apps.users.models import User
     from apps.payments.models import IdempotencyKey
 
     # Idempotency check

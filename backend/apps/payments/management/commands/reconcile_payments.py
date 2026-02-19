@@ -75,7 +75,8 @@ class Command(BaseCommand):
             errors.append(f"Found {broken_sites.count()} requests with broken site FK")
         if broken_subcontractors.exists():
             errors.append(
-                f"Found {broken_subcontractors.count()} requests with broken subcontractor FK"
+                f"Found {broken_subcontractors.count()} requests with broken "
+                "subcontractor FK"
             )
 
         if not (
@@ -93,7 +94,8 @@ class Command(BaseCommand):
         )
         if invalid_exclusivity.exists():
             errors.append(
-                f"Found {invalid_exclusivity.count()} requests violating legacy/ledger exclusivity"
+                f"Found {invalid_exclusivity.count()} requests violating "
+                "legacy/ledger exclusivity"
             )
         else:
             self.stdout.write(self.style.SUCCESS("  ✓ Legacy/ledger exclusivity valid"))
@@ -105,7 +107,8 @@ class Command(BaseCommand):
         )
         if invalid_fks.exists():
             errors.append(
-                f"Found {invalid_fks.count()} requests with both vendor and subcontractor"
+                f"Found {invalid_fks.count()} requests with both vendor and "
+                "subcontractor"
             )
         else:
             self.stdout.write(

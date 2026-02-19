@@ -298,7 +298,7 @@ def add_request(request, batchId):
             {
                 "error": {
                     "code": "CONFLICT",
-                    "message": "Request creation conflict (e.g. idempotency key reuse or duplicate)",
+                    "message": "Request creation conflict (idempotency or duplicate)",
                     "details": {},
                 }
             },
@@ -537,7 +537,7 @@ def approve_request(request, requestId):
             {
                 "error": {
                     "code": "CONFLICT",
-                    "message": "Approval conflict (e.g. duplicate approval or idempotency)",
+                    "message": "Approval conflict (duplicate approval or idempotency)",
                     "details": {},
                 }
             },

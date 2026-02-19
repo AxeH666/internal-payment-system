@@ -307,7 +307,6 @@ class PaymentBatchDetailSerializer(PaymentBatchSerializer):
 
     def get_batchTotal(self, obj):
         """Compute sum of request amounts (totals validation)."""
-        from django.db.models import Sum, Q
         from decimal import Decimal
 
         # Sum total_amount where present (ledger-driven), else amount (legacy)

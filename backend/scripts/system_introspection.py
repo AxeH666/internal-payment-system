@@ -13,13 +13,13 @@ sys.path.insert(0, BASE_DIR)
 # CRITICAL FIX: Set Django settings
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 
-import django
+import django  # noqa: E402
 
 django.setup()
 
-from django.conf import settings
-from django.db import connection
-from django.apps import apps
+from django.conf import settings  # noqa: E402
+from django.db import connection  # noqa: E402
+from django.apps import apps  # noqa: E402
 
 
 def print_header(title):

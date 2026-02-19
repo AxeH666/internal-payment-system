@@ -14,7 +14,6 @@ import requests
 import uuid
 import sys
 import subprocess
-import time
 
 BASE_URL = "http://127.0.0.1:8000/api/v1"
 
@@ -28,13 +27,20 @@ def check_server_connection():
             return True
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
         print("\n❌ ERROR: Backend server is not running!")
-        print(f"   Please start the server: python manage.py runserver")
-        print(f"   Expected URL: {BASE_URL.replace('/api/v1', '')}/api/health/")
+        print("   Please start the server: python manage.py runserver")
+        base = BASE_URL.replace("/api/v1", "")
+        print(f"   Expected URL: {base}/api/health/")
         return False
     return False
 
 
-ADMIN_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzcxNTA4Mjg4LCJpYXQiOjE3NzE0MjE4ODgsImp0aSI6Ijg5ODRmOTdlNWZmMDRkYjFiNWMyMjNhZjZmZmI5YTZiIiwidXNlcl9pZCI6ImU0M2U1NDA1LWU5ZTAtNDE1MS1iMWM1LTBkMDJiMjdiYjAxNyJ9.XOb437URyQNHo2BRqAb8xiuCQYU0WScZbFYLn5q2-Bc"
+ADMIN_TOKEN = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzcxNTA4Mjg4LCJpYXQiOjE3NzE0MjE4ODgs"
+    "Imp0aSI6Ijg5ODRmOTdlNWZmMDRkYjFiNWMyMjNhZjZmZmI5YTZiIiwidXNlcl9pZCI6ImU0M2U1"
+    "NDA1LWU5ZTAtNDE1MS1iMWM1LTBkMDJiMjdiYjAxNyJ9."
+    "XOb437URyQNHo2BRqAb8xiuCQYU0WScZbFYLn5q2-Bc"
+)
 CREATOR_TOKEN = "NEW_TOKEN_HERE"
 APPROVER_TOKEN = "NEW_TOKEN_HERE"
 
@@ -517,10 +523,12 @@ def test_reconciliation():
             timeout=30,
         )
 
-    assert_true(
-        result.returncode == 0,
-        f"Reconciliation successful (got {result.returncode}, stderr: {(result.stderr or '')[:200]})",
+    stderr_preview = (result.stderr or "")[:200]
+    msg = (
+        "Reconciliation successful "
+        f"(got {result.returncode}, stderr: {stderr_preview})"
     )
+    assert_true(result.returncode == 0, msg)
 
 
 # -----------------------------

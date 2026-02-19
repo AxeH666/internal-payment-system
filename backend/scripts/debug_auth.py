@@ -8,16 +8,16 @@ sys.path.insert(0, BASE_DIR)
 # CRITICAL FIX: Set Django settings
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 
-import django
+import django  # noqa: E402
 
 django.setup()
 
-from rest_framework_simplejwt.tokens import AccessToken
-from django.contrib.auth import get_user_model
-from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework.test import APIRequestFactory
+from rest_framework_simplejwt.tokens import AccessToken  # noqa: E402
+from django.contrib.auth import get_user_model  # noqa: E402
+from rest_framework_simplejwt.authentication import JWTAuthentication  # noqa: E402
+from rest_framework.test import APIRequestFactory  # noqa: E402
 
-User = get_user_model()
+User = get_user_model()  # noqa: E402
 
 
 def debug_token(token_str):

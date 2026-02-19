@@ -1,7 +1,7 @@
 # Generated migration for Phase 2 ledger-driven support
-# Ledger-driven PaymentRequests use entity_type, vendor/site, base_amount, total_amount
-# and do not use beneficiary_name, beneficiary_account, purpose (constraint requires null).
-# amount is populated from total_amount for ledger-driven.
+# Ledger-driven PaymentRequests use entity_type, vendor/site, base_amount,
+# total_amount and do not use beneficiary_name, beneficiary_account, purpose
+# (constraint requires null). amount is populated from total_amount for ledger-driven.
 
 from django.db import migrations, models
 import django.core.validators

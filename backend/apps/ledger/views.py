@@ -433,7 +433,7 @@ def list_or_create_subcontractors(request):
 @api_view(["PATCH"])
 @permission_classes([IsAdmin])
 def update_subcontractor(request, subcontractorId):
-    """PATCH /api/v1/ledger/subcontractors/{subcontractorId} - Update subcontractor (admin-only)"""
+    """PATCH /api/v1/ledger/subcontractors/{subcontractorId} - Update (admin-only)."""
     is_active = request.data.get("isActive")
     if is_active is None:
         return Response(
