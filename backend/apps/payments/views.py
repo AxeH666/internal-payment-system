@@ -5,6 +5,7 @@ All mutations flow through service layer.
 All endpoints define permission_classes per API contract.
 """
 
+from django.db import IntegrityError
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -74,16 +75,16 @@ def create_or_list_batches(request):
             return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
         except DomainError:
             raise
-        except Exception:
+        except IntegrityError:
             return Response(
                 {
                     "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": "An error occurred",
+                        "code": "CONFLICT",
+                        "message": "Batch creation conflict (e.g. duplicate)",
                         "details": {},
                     }
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_409_CONFLICT,
             )
 
     else:  # GET
@@ -176,16 +177,16 @@ def submit_batch(request, batchId):
         return Response({"data": serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
-    except Exception:
+    except IntegrityError:
         return Response(
             {
                 "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An error occurred",
+                    "code": "CONFLICT",
+                    "message": "Batch state conflict",
                     "details": {},
                 }
             },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status=status.HTTP_409_CONFLICT,
         )
 
 
@@ -203,16 +204,16 @@ def cancel_batch(request, batchId):
         return Response({"data": serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
-    except Exception:
+    except IntegrityError:
         return Response(
             {
                 "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An error occurred",
+                    "code": "CONFLICT",
+                    "message": "Batch state conflict",
                     "details": {},
                 }
             },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status=status.HTTP_409_CONFLICT,
         )
 
 
@@ -292,16 +293,16 @@ def add_request(request, batchId):
         return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
     except DomainError:
         raise
-    except Exception:
+    except IntegrityError:
         return Response(
             {
                 "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An error occurred",
+                    "code": "CONFLICT",
+                    "message": "Request creation conflict (e.g. idempotency key reuse or duplicate)",
                     "details": {},
                 }
             },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status=status.HTTP_409_CONFLICT,
         )
 
 
@@ -392,18 +393,41 @@ def get_or_update_request(request, batchId, requestId):
             )
             serializer = PaymentRequestSerializer(payment_request)
             return Response({"data": serializer.data}, status=status.HTTP_200_OK)
-        except DomainError:
-            raise
-        except Exception:
+        except DomainError as e:
+            # Map domain errors to 4xx in-view so PATCH_AFTER_APPROVE always returns 409
+            _status = (
+                status.HTTP_409_CONFLICT
+                if e.code == "INVALID_STATE"
+                else (
+                    status.HTTP_404_NOT_FOUND
+                    if e.code == "NOT_FOUND"
+                    else (
+                        status.HTTP_403_FORBIDDEN
+                        if e.code == "FORBIDDEN"
+                        else status.HTTP_400_BAD_REQUEST
+                    )
+                )
+            )
             return Response(
                 {
                     "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": "An error occurred",
+                        "code": e.code,
+                        "message": e.message,
+                        "details": e.details,
+                    }
+                },
+                status=_status,
+            )
+        except IntegrityError:
+            return Response(
+                {
+                    "error": {
+                        "code": "CONFLICT",
+                        "message": "Cannot update request in current state",
                         "details": {},
                     }
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_409_CONFLICT,
             )
 
 
@@ -508,16 +532,16 @@ def approve_request(request, requestId):
         return Response({"data": detail_serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
-    except Exception:
+    except IntegrityError:
         return Response(
             {
                 "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An error occurred",
+                    "code": "CONFLICT",
+                    "message": "Approval conflict (e.g. duplicate approval or idempotency)",
                     "details": {},
                 }
             },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status=status.HTTP_409_CONFLICT,
         )
 
 
@@ -545,16 +569,16 @@ def reject_request(request, requestId):
         return Response({"data": detail_serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
-    except Exception:
+    except IntegrityError:
         return Response(
             {
                 "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An error occurred",
+                    "code": "CONFLICT",
+                    "message": "Rejection conflict",
                     "details": {},
                 }
             },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status=status.HTTP_409_CONFLICT,
         )
 
 
@@ -576,16 +600,16 @@ def mark_paid(request, requestId):
         return Response({"data": detail_serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
-    except Exception:
+    except IntegrityError:
         return Response(
             {
                 "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An error occurred",
+                    "code": "CONFLICT",
+                    "message": "Mark-paid conflict (e.g. idempotency)",
                     "details": {},
                 }
             },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status=status.HTTP_409_CONFLICT,
         )
 
 
@@ -629,16 +653,16 @@ def upload_or_list_soa(request, batchId, requestId):
             return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
         except DomainError:
             raise
-        except Exception:
+        except IntegrityError:
             return Response(
                 {
                     "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": "An error occurred",
+                        "code": "CONFLICT",
+                        "message": "SOA upload conflict",
                         "details": {},
                     }
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_409_CONFLICT,
             )
 
     else:  # GET
@@ -740,7 +764,7 @@ def download_soa_document(request, batchId, requestId, versionId):
         return FileResponse(
             file, as_attachment=True, filename=f"soa_v{soa_version.version_number}.pdf"
         )
-    except Exception:
+    except OSError:
         raise Http404("File not found")
 
 

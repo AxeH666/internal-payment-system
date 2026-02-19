@@ -48,7 +48,7 @@ def create_batch(creator_id, title):
         ValidationError: If title is empty
         NotFoundError: If creator does not exist
     """
-    from apps.users.models import User, Role
+    from apps.users.models import User
 
     if not title or not title.strip():
         raise ValidationError("Title must be non-empty")
@@ -126,7 +126,7 @@ def add_request(
         PermissionDeniedError: If creator is not batch creator
         ValidationError: If validation fails
     """
-    from apps.users.models import User, Role, Role
+    from apps.users.models import User, Role
     from apps.ledger.models import Vendor, Subcontractor, Site
     from apps.payments.models import IdempotencyKey
 
@@ -188,7 +188,6 @@ def add_request(
                     )
                 except Vendor.DoesNotExist:
                     raise NotFoundError(f"Active Vendor {vendor_id} does not exist")
-                entity_obj = vendor
                 entity_name = vendor.name
             else:  # SUBCONTRACTOR
                 if not subcontractor_id:
@@ -207,7 +206,6 @@ def add_request(
                     raise NotFoundError(
                         f"Active Subcontractor {subcontractor_id} does not exist"
                     )
-                entity_obj = subcontractor
                 entity_name = subcontractor.name
 
             if not site_id:
@@ -381,10 +379,16 @@ def update_request(request_id, batch_id, creator_id, **fields):
     """
     from apps.users.models import User, Role
 
-    try:
-        request = PaymentRequest.objects.select_for_update().get(id=request_id)
-    except PaymentRequest.DoesNotExist:
-        raise NotFoundError(f"PaymentRequest {request_id} does not exist")
+    # select_for_update() requires an active transaction (Django raises TransactionManagementError otherwise)
+    with transaction.atomic():
+        try:
+            request = PaymentRequest.objects.select_for_update().get(id=request_id)
+        except PaymentRequest.DoesNotExist:
+            raise NotFoundError(f"PaymentRequest {request_id} does not exist")
+
+    # Check request state first (before any request.batch access) so PATCH after approve returns 409
+    if request.status != "DRAFT":
+        raise InvalidStateError(f"Cannot update request with status {request.status}")
 
     if str(request.batch_id) != str(batch_id):
         raise NotFoundError(
@@ -399,16 +403,6 @@ def update_request(request_id, batch_id, creator_id, **fields):
     # Check ownership
     if creator.role != Role.ADMIN and request.batch.created_by_id != creator_id:
         raise PermissionDeniedError("Only the batch creator can update requests")
-
-    # Check request state
-    if request.status != "DRAFT":
-        raise InvalidStateError(f"Cannot update request with status {request.status}")
-
-    # Phase 2: Immutable financial lock - block modifications when APPROVED/PAID
-    if request.status in ("APPROVED", "PAID"):
-        raise InvalidStateError(
-            "Financial fields are locked when request is APPROVED or PAID"
-        )
 
     # Check batch state
     if is_closed_batch(request.batch.status):

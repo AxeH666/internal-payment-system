@@ -9,6 +9,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import authenticate
 from apps.auth.serializers import LoginSerializer
 from apps.users.serializers import UserSerializer
@@ -67,8 +68,8 @@ def logout(request):
         if refresh_token:
             token = RefreshToken(refresh_token)
             token.blacklist()
-    except Exception:
-        # Token may already be invalid, ignore
+    except (TokenError, ValueError):
+        # Invalid or already blacklisted token - treat as success for idempotency
         pass
 
     return Response({"data": {"success": True}}, status=status.HTTP_200_OK)

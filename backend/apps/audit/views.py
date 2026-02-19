@@ -95,7 +95,7 @@ def query_audit_log(request):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        except Exception:
+        except (ValueError, TypeError):
             return Response(
                 {
                     "error": {
@@ -123,7 +123,7 @@ def query_audit_log(request):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        except Exception:
+        except (ValueError, TypeError):
             return Response(
                 {
                     "error": {

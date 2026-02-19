@@ -6,11 +6,11 @@ Admin-only mutations for POST/PATCH.
 Read-only for authenticated users.
 """
 
+from django.db import IntegrityError
+
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.pagination import LimitOffsetPagination
-
 from core.permissions import IsAdmin, IsAuthenticatedReadOnly
 from core.exceptions import DomainError
 from apps.ledger import services
@@ -46,7 +46,7 @@ def list_or_create_clients(request):
                 {
                     "error": {
                         "code": "FORBIDDEN",
-                        "message": "You do not have permission to perform this action",
+                        "message": "Permission denied",
                         "details": {},
                     }
                 },
@@ -89,16 +89,16 @@ def list_or_create_clients(request):
             return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
         except DomainError:
             raise
-        except Exception:
+        except IntegrityError:
             return Response(
                 {
                     "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": "An error occurred",
+                        "code": "CONFLICT",
+                        "message": "A client with this name already exists",
                         "details": {},
                     }
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_409_CONFLICT,
             )
 
 
@@ -125,17 +125,6 @@ def update_client(request, clientId):
         return Response({"data": serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
-    except Exception:
-        return Response(
-            {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An error occurred",
-                    "details": {},
-                }
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
 
 
 # -----------------------------
@@ -153,7 +142,7 @@ def list_or_create_sites(request):
                 {
                     "error": {
                         "code": "FORBIDDEN",
-                        "message": "You do not have permission to perform this action",
+                        "message": "Permission denied",
                         "details": {},
                     }
                 },
@@ -212,21 +201,16 @@ def list_or_create_sites(request):
             return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
         except DomainError:
             raise
-        except Exception as e:
-            import traceback
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.exception("Error creating site", exc_info=e)
+        except IntegrityError:
             return Response(
                 {
                     "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": f"An error occurred: {str(e)}",
-                        "details": {"traceback": traceback.format_exc()},
+                        "code": "CONFLICT",
+                        "message": "A site with this code already exists",
+                        "details": {},
                     }
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_409_CONFLICT,
             )
 
 
@@ -253,17 +237,6 @@ def update_site(request, siteId):
         return Response({"data": serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
-    except Exception:
-        return Response(
-            {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An error occurred",
-                    "details": {},
-                }
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
 
 
 # -----------------------------
@@ -281,7 +254,7 @@ def list_or_create_vendors(request):
                 {
                     "error": {
                         "code": "FORBIDDEN",
-                        "message": "You do not have permission to perform this action",
+                        "message": "Permission denied",
                         "details": {},
                     }
                 },
@@ -339,16 +312,16 @@ def list_or_create_vendors(request):
             return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
         except DomainError:
             raise
-        except Exception:
+        except IntegrityError:
             return Response(
                 {
                     "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": "An error occurred",
+                        "code": "CONFLICT",
+                        "message": "Vendor name already exists for this type",
                         "details": {},
                     }
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_409_CONFLICT,
             )
 
 
@@ -375,17 +348,6 @@ def update_vendor(request, vendorId):
         return Response({"data": serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
-    except Exception:
-        return Response(
-            {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An error occurred",
-                    "details": {},
-                }
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
 
 
 # -----------------------------
@@ -403,7 +365,7 @@ def list_or_create_subcontractors(request):
                 {
                     "error": {
                         "code": "FORBIDDEN",
-                        "message": "You do not have permission to perform this action",
+                        "message": "Permission denied",
                         "details": {},
                     }
                 },
@@ -455,16 +417,16 @@ def list_or_create_subcontractors(request):
             return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
         except DomainError:
             raise
-        except Exception:
+        except IntegrityError:
             return Response(
                 {
                     "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": "An error occurred",
+                        "code": "CONFLICT",
+                        "message": "Subcontractor name already exists for this scope",
                         "details": {},
                     }
                 },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_409_CONFLICT,
             )
 
 
@@ -493,17 +455,6 @@ def update_subcontractor(request, subcontractorId):
         return Response({"data": serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
-    except Exception:
-        return Response(
-            {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An error occurred",
-                    "details": {},
-                }
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
 
 
 # -----------------------------
