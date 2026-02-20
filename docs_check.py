@@ -115,8 +115,22 @@ IMPLEMENTATION_PLAN_REQUIRED_CONTENT = [
     ("Branch strategy introduction timing", ["Branch Strategy", "develop", "Phase 2"]),
     ("Architecture freeze tag", ["architecture freeze", "arch-freeze", "Tag"]),
     ("Feature branch workflow", ["feature branch", "Feature branch"]),
-    ("Hardening tests explicitly listed", ["Concurrency", "Duplicate", "Permission", "Closed batch", "Paid mutation", "SOA"], 4),
-    ("Guardrails explicit and strict", ["Guardrails", "No new entity", "No new endpoint", "No permission bypass"]),
+    (
+        "Hardening tests explicitly listed",
+        [
+            "Concurrency",
+            "Duplicate",
+            "Permission",
+            "Closed batch",
+            "Paid mutation",
+            "SOA",
+        ],
+        4,
+    ),
+    (
+        "Guardrails explicit and strict",
+        ["Guardrails", "No new entity", "No new endpoint", "No permission bypass"],
+    ),
     ("No skipping layers", ["No skipping", "skipping layers", "Bottom-up"]),
 ]
 
@@ -145,24 +159,58 @@ TECH_STACK_VAGUE_PHRASES = [
 
 TECH_STACK_REQUIRED_CONTENT = [
     ("Exact versions appear", ["3.11", "5.0", "18.2", "16.4", "pinned"]),
-    ("No unnecessary monitoring stack", ["no third-party", "no Datadog", "No third-party", "out of scope"]),
+    (
+        "No unnecessary monitoring stack",
+        ["no third-party", "no Datadog", "No third-party", "out of scope"],
+    ),
 ]
 
 FRONTEND_GUIDELINES_REQUIRED_CONTENT = [
-    ("No business logic in frontend", ["business logic", "frontend", "server", "backend"]),
-    ("No state transitions defined client-side", ["state transition", "client-side", "client", "server"]),
+    (
+        "No business logic in frontend",
+        ["business logic", "frontend", "server", "backend"],
+    ),
+    (
+        "No state transitions defined client-side",
+        ["state transition", "client-side", "client", "server"],
+    ),
     ("UI disables CLOSED/PAID actions", ["CLOSED", "PAID", "disabled", "disable"]),
     ("Error rendering standardized", ["error", "standardized", "standard", "format"]),
     ("Concurrency reload defined", ["concurrency", "reload", "409", "CONFLICT"]),
-    ("No visual styling specifics", ["no color", "no branding", "no visual", "exclude styling", "avoid branding"]),
+    (
+        "No visual styling specifics",
+        ["no color", "no branding", "no visual", "exclude styling", "avoid branding"],
+    ),
 ]
 
 APP_FLOW_REQUIRED_CONTENT = [
-    ("All Phase 1.3 screens exist", ["/login", "/batches", "/batches/new", "/audit", "/requests"], 5),
-    ("No screen allows illegal state transition", ["State-Based UI Visibility", "Hidden", "DRAFT", "PENDING_APPROVAL", "APPROVED"]),
-    ("Every action maps to API endpoint", ["Action-to-API Mapping", "API Endpoint", "/api/v1"]),
-    ("No business logic assumed client-side", ["No client-side business logic", "server", "source of truth"]),
-    ("CLOSED batch disables actions", ["CLOSED batch", "COMPLETED", "CANCELLED", "disabled"]),
+    (
+        "All Phase 1.3 screens exist",
+        ["/login", "/batches", "/batches/new", "/audit", "/requests"],
+        5,
+    ),
+    (
+        "No screen allows illegal state transition",
+        [
+            "State-Based UI Visibility",
+            "Hidden",
+            "DRAFT",
+            "PENDING_APPROVAL",
+            "APPROVED",
+        ],
+    ),
+    (
+        "Every action maps to API endpoint",
+        ["Action-to-API Mapping", "API Endpoint", "/api/v1"],
+    ),
+    (
+        "No business logic assumed client-side",
+        ["No client-side business logic", "server", "source of truth"],
+    ),
+    (
+        "CLOSED batch disables actions",
+        ["CLOSED batch", "COMPLETED", "CANCELLED", "disabled"],
+    ),
     ("HOLD to RESUBMIT path exists", ["HOLD", "RESUBMIT"]),
     ("FINAL SOA locks UI", ["Upload SOA", "DRAFT", "Hidden"], 2),
 ]
@@ -180,9 +228,15 @@ BACKEND_STRUCTURE_REQUIRED_CONTENT = [
     ("transaction.atomic for generate SOA", ["upload_soa", "transaction.atomic"], 2),
     ("transaction.atomic for close batch", ["cancel_batch", "transaction.atomic"], 2),
     ("select_for_update requirement", ["select_for_update"]),
-    ("Audit integration clearly defined", ["Audit Integration", "AuditLog", "create_audit"]),
+    (
+        "Audit integration clearly defined",
+        ["Audit Integration", "AuditLog", "create_audit"],
+    ),
     ("Service layer separation from views", ["service layer", "views"]),
-    ("No direct model mutation from API view", ["direct model", "bypassing service", "Model.save", "never call"]),
+    (
+        "No direct model mutation from API view",
+        ["direct model", "bypassing service", "Model.save", "never call"],
+    ),
     ("JSON logging structure defined", ["JSON", "logging", "structured"]),
 ]
 
@@ -292,7 +346,9 @@ def check_security_model_content(content):
 
 def check_security_invariants_numbered(content):
     """Verify Security Invariants section has numbered items (SI-1, SI-2, etc.)."""
-    return "SI-1" in content or "SI-2" in content or re.search(r"\d+\.\s+\*\*SI-", content)
+    return (
+        "SI-1" in content or "SI-2" in content or re.search(r"\d+\.\s+\*\*SI-", content)
+    )
 
 
 def check_backend_structure_content(content):
@@ -537,7 +593,9 @@ def run_checks():
                 print("  [OK] No CI/CD complexity beyond MVP")
             impl_missing = check_implementation_plan_content(content)
             if impl_missing:
-                print(f"  [FAIL] Missing implementation plan requirements: {impl_missing}")
+                print(
+                    f"  [FAIL] Missing implementation plan requirements: {impl_missing}"
+                )
                 all_passed = False
             else:
                 print("  [OK] Implementation plan requirements present")

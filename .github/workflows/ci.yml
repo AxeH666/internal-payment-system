@@ -1,0 +1,109 @@
+name: Governance Checks
+
+on:
+  pull_request:
+    branches:
+      - develop
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Backend Image
+        run: docker build ./backend
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Migration integrity check
+        env:
+          DJANGO_SETTINGS_MODULE: core.settings
+          DEBUG: "True"
+          SECRET_KEY: "ci-secret-key"
+          POSTGRES_DB: "internal_payments"
+          POSTGRES_USER: "postgres"
+          POSTGRES_PASSWORD: "postgres"
+          POSTGRES_HOST: "localhost"
+          POSTGRES_PORT: "5432"
+        run: python3 backend/manage.py makemigrations --check --dry-run
+
+      - name: Run docs check
+        run: python3 docs_check.py
+
+      - name: Run engineering audit
+        run: python3 engineering_audit.py
+
+  runtime-smoke-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t internal-backend ./backend
+
+      - name: Start Postgres
+        run: |
+          docker run -d \
+            --name pg \
+            -e POSTGRES_DB=internal_payments \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -p 5432:5432 \
+            postgres:15
+
+          sleep 10
+
+      - name: Run backend container
+        run: |
+          docker run -d \
+            --name backend \
+            --link pg:postgres \
+            -p 8000:8000 \
+            -e POSTGRES_DB=internal_payments \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_HOST=postgres \
+            -e POSTGRES_PORT=5432 \
+            -e SECRET_KEY=ci-secret-key-32-characters-long-minimum \
+            internal-backend
+
+          sleep 10
+
+      - name: Wait for backend health
+        run: |
+          for i in {1..20}; do
+            if curl -sf http://localhost:8000/api/health/ > /dev/null; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Backend failed health check"
+          exit 1
+
+      - name: Health endpoint validation
+        run: |
+          curl -s http://localhost:8000/api/health/ | grep '"status": "ok"'
+          curl -s http://localhost:8000/api/health/ | grep '"database": "connected"'
+          curl -s http://localhost:8000/api/health/ | grep '"architecture_version": "v0.2.0"'
+
+      - name: Create user
+        run: |
+          docker exec backend python manage.py shell -c "from apps.users.models import User; u, _ = User.objects.get_or_create(username='ciuser', defaults={'display_name': 'ciuser', 'role': 'CREATOR'}); u.display_name='ciuser'; u.role='CREATOR'; u.set_password('ciuser'); u.save()"
+
+      - name: Login smoke test
+        run: |
+          RESPONSE=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"username":"ciuser","password":"ciuser"}')
+
+          echo "$RESPONSE"
+          echo "$RESPONSE" | grep '"token"' || exit 1
