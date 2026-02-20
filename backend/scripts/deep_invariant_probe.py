@@ -1,8 +1,13 @@
 import sys
+import os
 import uuid
 import requests
 
-BASE = "http://127.0.0.1:8000/api/v1"
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+USERNAME = os.getenv("E2E_USERNAME", "admin")
+PASSWORD = os.getenv("E2E_PASSWORD", "admin")
+
+BASE = f"{BASE_URL}/api/v1"
 LOGIN = f"{BASE}/auth/login"
 
 
@@ -22,8 +27,26 @@ def safe_json(resp, label):
 
 
 def login():
-    r = requests.post(LOGIN, json={"username": "admin", "password": "admin123"})
-    data = safe_json(r, "LOGIN")
+    r = requests.post(
+        f"{BASE_URL}/api/v1/auth/login",
+        json={"username": USERNAME, "password": PASSWORD},
+        timeout=5,
+    )
+
+    if r.status_code != 200:
+        raise RuntimeError(f"[LOGIN FAILED] Status={r.status_code} Body={r.text}")
+
+    try:
+        data = r.json()
+    except Exception as e:
+        raise RuntimeError(f"[LOGIN FAILED] Invalid JSON response: {r.text}") from e
+
+    if not isinstance(data, dict):
+        raise RuntimeError(f"[LOGIN FAILED] Unexpected response type: {type(data)}")
+
+    if "data" not in data or "token" not in data["data"]:
+        raise RuntimeError(f"[LOGIN FAILED] Unexpected login response format: {data}")
+
     return data["data"]["token"]
 
 
@@ -137,7 +160,23 @@ def run():
         f"{BASE}/requests/{req['id']}/approve",
         headers=headers(token, str(uuid.uuid4())),
     )
-    safe_json(r, "APPROVE")
+    j = safe_json(r, "APPROVE")
+    if r.status_code >= 400 or "error" in j:
+        err = j.get("error", {})
+        print("❌ APPROVE failed:", err.get("message"), err.get("details"))
+        sys.exit(1)
+
+    print("\n--- Mark paid (full flow: create → submit → approve → mark_paid) ---")
+
+    r = requests.post(
+        f"{BASE}/requests/{req['id']}/mark-paid",
+        headers=headers(token, str(uuid.uuid4())),
+    )
+    j = safe_json(r, "MARK_PAID")
+    if r.status_code >= 400 or "error" in j:
+        err = j.get("error", {})
+        print("❌ MARK_PAID failed:", err.get("message"), err.get("details"))
+        sys.exit(1)
 
     print("\n--- Attempt modify after approval ---")
 

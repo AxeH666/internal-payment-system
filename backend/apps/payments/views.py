@@ -5,21 +5,23 @@ All mutations flow through service layer.
 All endpoints define permission_classes per API contract.
 """
 
+import logging
+
+from django.core.files.storage import default_storage
 from django.db import IntegrityError
+from django.http import FileResponse, Http404, HttpResponse
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.response import Response
 from rest_framework.pagination import LimitOffsetPagination
-from django.http import FileResponse, Http404, HttpResponse
-from django.core.files.storage import default_storage
+from rest_framework.response import Response
 
+from core.exceptions import DomainError
 from core.permissions import (
     IsCreator,
     IsApprover,
     IsCreatorOrApprover,
     IsAuthenticatedReadOnly,
 )
-from core.exceptions import DomainError
 from apps.payments.models import PaymentBatch, PaymentRequest, SOAVersion
 from apps.payments import services
 from apps.payments.serializers import (
@@ -32,6 +34,8 @@ from apps.payments.serializers import (
     SOAVersionSerializer,
     SOAVersionDetailSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(["POST", "GET"])
@@ -228,6 +232,7 @@ def add_request(request, batchId):
     """
     from decimal import Decimal, InvalidOperation
 
+    logger.debug("add_request invoked", extra={"batchId": str(batchId)})
     # Phase 2: Ledger-driven fields
     entity_type = request.data.get("entityType")
     vendor_id = request.data.get("vendorId")

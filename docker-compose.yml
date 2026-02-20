@@ -20,6 +20,8 @@ services:
         condition: service_healthy
     env_file:
       - ./backend/.env
+    environment:
+      - ALLOWED_HOSTS=localhost,127.0.0.1,backend
     ports:
       - "8000:8000"
     healthcheck:

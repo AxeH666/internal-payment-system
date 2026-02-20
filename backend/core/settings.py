@@ -39,16 +39,12 @@ if not SECRET_KEY:
 
 DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
-# ALLOWED_HOSTS: optional in DEBUG, required in production
-ALLOWED_HOSTS_STR = os.environ.get("ALLOWED_HOSTS", "")
-if not ALLOWED_HOSTS_STR:
-    if not DEBUG:
-        raise ValueError("ALLOWED_HOSTS environment variable is required in production")
-    ALLOWED_HOSTS = []
-else:
-    ALLOWED_HOSTS = [
-        host.strip() for host in ALLOWED_HOSTS_STR.split(",") if host.strip()
-    ]
+# ALLOWED_HOSTS: environment-aware configuration
+ALLOWED_HOSTS = (
+    [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()]
+    if os.environ.get("ALLOWED_HOSTS")
+    else []
+)
 
 
 # Application definition

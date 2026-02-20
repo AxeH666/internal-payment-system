@@ -9,7 +9,7 @@ Rules:
 - No direct model.save() from views
 """
 
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.utils import timezone
 from core.exceptions import (
     ValidationError,
@@ -736,9 +736,11 @@ def approve_request(request_id, approver_id, comment=None, idempotency_key=None)
                 "Only users with APPROVER or ADMIN role can approve requests"
             )
 
-        # Check request state
+        # Check request state first
+        # If status is APPROVED, this is a duplicate approval → return 409 CONFLICT
         if request.status != "PENDING_APPROVAL":
             if request.status == "APPROVED":
+                # Duplicate approval attempt → return 409 CONFLICT
                 # Idempotency: same key = return success (retry); different key = block
                 if idempotency_key:
                     existing = IdempotencyKey.objects.filter(
@@ -751,13 +753,28 @@ def approve_request(request_id, approver_id, comment=None, idempotency_key=None)
                 f"Cannot approve request with status {request.status}"
             )
 
-        # Create ApprovalRecord
-        ApprovalRecord.objects.create(
-            payment_request=request,
-            approver=approver,
-            decision="APPROVED",
-            comment=comment.strip() if comment else None,
-        )
+        # Status is PENDING_APPROVAL
+        # Check if ApprovalRecord already exists (idempotency check for race conditions)
+        # This check happens inside the transaction after acquiring the lock
+        if ApprovalRecord.objects.filter(payment_request=request).exists():
+            # ApprovalRecord exists but status still PENDING_APPROVAL (race condition)
+            # Return success (idempotency) - status update in progress in another txn
+            request.refresh_from_db()
+            return request
+
+        # Create ApprovalRecord (with try/except for race condition handling)
+        try:
+            ApprovalRecord.objects.create(
+                payment_request=request,
+                approver=approver,
+                decision="APPROVED",
+                comment=comment.strip() if comment else None,
+            )
+        except IntegrityError:
+            # Race condition: another transaction created ApprovalRecord
+            # Return success (idempotency)
+            request.refresh_from_db()
+            return request
 
         # Transition request to APPROVED with version locking
         validate_transition("PaymentRequest", request.status, "APPROVED")
@@ -861,18 +878,26 @@ def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
                 f"Cannot reject request with status {request.status}"
             )
 
-        # Check if ApprovalRecord already exists
-        if hasattr(request, "approval"):
-            # Idempotency: return success without duplicate
+        # Check if ApprovalRecord already exists (idempotency)
+        # Use exists() not hasattr() for reliability in concurrent scenarios
+        if ApprovalRecord.objects.filter(payment_request=request).exists():
+            # ApprovalRecord already exists - return success (idempotency)
+            request.refresh_from_db()
             return request
 
-        # Create ApprovalRecord
-        ApprovalRecord.objects.create(
-            payment_request=request,
-            approver=approver,
-            decision="REJECTED",
-            comment=comment.strip() if comment else None,
-        )
+        # Create ApprovalRecord (with try/except for race condition handling)
+        try:
+            ApprovalRecord.objects.create(
+                payment_request=request,
+                approver=approver,
+                decision="REJECTED",
+                comment=comment.strip() if comment else None,
+            )
+        except IntegrityError:
+            # Race condition: another transaction created ApprovalRecord
+            # Return success (idempotency)
+            request.refresh_from_db()
+            return request
 
         # Transition request to REJECTED with version locking
         validate_transition("PaymentRequest", request.status, "REJECTED")
@@ -949,10 +974,10 @@ def mark_paid(request_id, actor_id, idempotency_key=None):
     except User.DoesNotExist:
         raise NotFoundError(f"User {actor_id} does not exist")
 
-    # Check role
-    if actor.role not in ("CREATOR", "APPROVER"):
+    # Check role (ADMIN can mark paid, consistent with approve/reject)
+    if actor.role not in ("CREATOR", "APPROVER", "ADMIN"):
         raise PermissionDeniedError(
-            "Only CREATOR or APPROVER can mark requests as paid"
+            "Only CREATOR, APPROVER, or ADMIN can mark requests as paid"
         )
 
     with transaction.atomic():

@@ -6,10 +6,15 @@ Use only in local or CI test environments.
 """
 
 import sys
+import os
 import uuid
 import requests
 
-BASE = "http://127.0.0.1:8000/api/v1"
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+USERNAME = os.getenv("E2E_USERNAME", "admin")
+PASSWORD = os.getenv("E2E_PASSWORD", "admin")
+
+BASE = f"{BASE_URL}/api/v1"
 LOGIN_URL = f"{BASE}/auth/login"
 
 
@@ -24,11 +29,26 @@ def safe_json(resp, label):
 
 
 def login():
-    r = requests.post(LOGIN_URL, json={"username": "admin", "password": "admin123"})
-    data = safe_json(r, "LOGIN")
-    if not data or "data" not in data or "token" not in data["data"]:
-        print("LOGIN failed:", getattr(r, "status_code", None), data)
-        sys.exit(1)
+    r = requests.post(
+        f"{BASE_URL}/api/v1/auth/login",
+        json={"username": USERNAME, "password": PASSWORD},
+        timeout=5,
+    )
+
+    if r.status_code != 200:
+        raise RuntimeError(f"[LOGIN FAILED] Status={r.status_code} Body={r.text}")
+
+    try:
+        data = r.json()
+    except Exception as e:
+        raise RuntimeError(f"[LOGIN FAILED] Invalid JSON response: {r.text}") from e
+
+    if not isinstance(data, dict):
+        raise RuntimeError(f"[LOGIN FAILED] Unexpected response type: {type(data)}")
+
+    if "data" not in data or "token" not in data["data"]:
+        raise RuntimeError(f"[LOGIN FAILED] Unexpected login response format: {data}")
+
     return data["data"]["token"]
 
 

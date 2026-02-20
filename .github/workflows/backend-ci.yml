@@ -41,6 +41,20 @@ jobs:
           cd backend
           pip install -r requirements.txt
 
+      - name: Migration drift check
+        env:
+          DJANGO_SETTINGS_MODULE: core.settings
+          SECRET_KEY: ci-secret-key-min-32-chars
+          DEBUG: "True"
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testdb
+        run: |
+          cd backend
+          python manage.py makemigrations --check --dry-run
+
       - name: Black check
         run: |
           cd backend
@@ -65,8 +79,58 @@ jobs:
           cd backend
           python manage.py test
 
+      - name: Run migrations (for probe)
+        env:
+          DJANGO_SETTINGS_MODULE: core.settings
+          SECRET_KEY: ci-secret-key-min-32-chars
+          DEBUG: "True"
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testdb
+        run: |
+          cd backend
+          python manage.py migrate --noinput
+
+      - name: Create admin user (for probe)
+        env:
+          DJANGO_SETTINGS_MODULE: core.settings
+          SECRET_KEY: ci-secret-key-min-32-chars
+          DEBUG: "True"
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testdb
+        run: |
+          cd backend
+          python manage.py shell -c "
+          from apps.users.models import User
+          if not User.objects.filter(username='admin').exists():
+              User.objects.create_superuser(username='admin', password='admin')
+          "
+
+      - name: Start backend server
+        env:
+          DJANGO_SETTINGS_MODULE: core.settings
+          SECRET_KEY: ci-secret-key-min-32-chars
+          DEBUG: "True"
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testdb
+        run: |
+          cd backend
+          python manage.py runserver 8000 &
+          sleep 5
+
       - name: Deep Invariant Probe
         env:
+          BASE_URL: http://127.0.0.1:8000
+          E2E_USERNAME: admin
+          E2E_PASSWORD: admin
           DJANGO_SETTINGS_MODULE: core.settings
           SECRET_KEY: ci-secret-key-min-32-chars
           DEBUG: "True"

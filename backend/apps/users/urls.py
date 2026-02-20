@@ -9,5 +9,5 @@ app_name = "users"
 
 urlpatterns = [
     path("me", views.get_current_user, name="current-user"),
-    path("", views.list_users, name="list-users"),
+    path("", views.list_or_create_users, name="list-or-create-users"),
 ]

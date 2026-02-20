@@ -165,7 +165,7 @@ class PaymentRequest(models.Model):
     )
     # Phase 2: Version locking and execution tracking
     version = models.IntegerField(default=1)
-    execution_id = models.UUIDField(null=True, blank=True, db_index=True)
+    execution_id = models.UUIDField(null=True, blank=True)
 
     class Meta:
         db_table = "payment_requests"
@@ -184,7 +184,8 @@ class PaymentRequest(models.Model):
                 name="valid_request_status",
             ),
             models.CheckConstraint(
-                check=models.Q(amount__gt=0), name="amount_positive"
+                check=models.Q(amount__isnull=True) | models.Q(amount__gt=0),
+                name="amount_positive",
             ),
             # Phase 2: Legacy vs LedgerDriven mutual exclusivity
             models.CheckConstraint(

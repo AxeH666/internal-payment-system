@@ -21,3 +21,5 @@ sqlparse==0.5.5
 gunicorn
 reportlab==4.2.5
 openpyxl==3.1.5
+requests>=2.31.0
+requests>=2.31.0

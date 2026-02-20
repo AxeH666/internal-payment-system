@@ -125,6 +125,17 @@ def update_client(request, clientId):
         return Response({"data": serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
+    except IntegrityError:
+        return Response(
+            {
+                "error": {
+                    "code": "CONFLICT",
+                    "message": "Resource violates a uniqueness constraint.",
+                    "details": {},
+                }
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
 
 
 # -----------------------------
@@ -237,6 +248,17 @@ def update_site(request, siteId):
         return Response({"data": serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
+    except IntegrityError:
+        return Response(
+            {
+                "error": {
+                    "code": "CONFLICT",
+                    "message": "Resource violates a uniqueness constraint.",
+                    "details": {},
+                }
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
 
 
 # -----------------------------
@@ -348,6 +370,17 @@ def update_vendor(request, vendorId):
         return Response({"data": serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
+    except IntegrityError:
+        return Response(
+            {
+                "error": {
+                    "code": "CONFLICT",
+                    "message": "Resource violates a uniqueness constraint.",
+                    "details": {},
+                }
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
 
 
 # -----------------------------
@@ -455,6 +488,17 @@ def update_subcontractor(request, subcontractorId):
         return Response({"data": serializer.data}, status=status.HTTP_200_OK)
     except DomainError:
         raise
+    except IntegrityError:
+        return Response(
+            {
+                "error": {
+                    "code": "CONFLICT",
+                    "message": "Resource violates a uniqueness constraint.",
+                    "details": {},
+                }
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
 
 
 # -----------------------------

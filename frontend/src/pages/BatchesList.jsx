@@ -3,7 +3,6 @@ import { useNavigate, Link } from 'react-router-dom'
 import api from '../utils/api'
 import { handleErrorResponse } from '../utils/errorHandler'
 import { getCurrentUser } from '../utils/auth'
-import { logout } from '../utils/auth'
 
 /**
  * R3: Batches List Screen
@@ -56,26 +55,13 @@ const BatchesList = () => {
     }
   }, [statusFilter])
 
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login')
-  }
-
   if (loading) {
     return <div style={{ padding: '20px' }}>Loading...</div>
   }
 
   return (
     <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1>Payment Batches</h1>
-        <div>
-          {user && <span style={{ marginRight: '15px' }}>Welcome, {user.displayName} ({user.role})</span>}
-          <button onClick={handleLogout} style={{ padding: '8px 16px', cursor: 'pointer' }}>
-            Logout
-          </button>
-        </div>
-      </div>
+      <h1 style={{ marginBottom: '20px' }}>Payment Batches</h1>
 
       {error && (
         <div style={{ color: 'red', marginBottom: '15px', padding: '10px', backgroundColor: '#ffe6e6', borderRadius: '4px' }}>

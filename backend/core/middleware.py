@@ -56,7 +56,11 @@ class IdempotencyKeyMiddleware:
     """Enforce idempotency key requirement on mutation endpoints."""
 
     MUTATION_METHODS = ["POST", "PATCH", "PUT"]
-    EXCLUDED_PATHS = ["/api/v1/auth/login", "/api/health/"]
+    EXCLUDED_PATHS = [
+        "/api/v1/auth/login",
+        "/api/v1/auth/logout",  # Logout is naturally idempotent
+        "/api/health/",
+    ]
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -74,7 +78,10 @@ class IdempotencyKeyMiddleware:
                         {
                             "error": {
                                 "code": "VALIDATION_ERROR",
-                                "message": "Idempotency-Key required",
+                                "message": (
+                                    "Idempotency-Key header is required for "
+                                    "mutation requests"
+                                ),
                                 "details": {},
                             }
                         },
