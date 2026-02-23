@@ -40,7 +40,6 @@ jobs:
         run: |
           cd backend
           pip install -r requirements.txt
-          pip install black==24.4.2
 
       - name: Migration drift check
         env:

@@ -5,8 +5,6 @@ All mutations flow through service layer.
 All endpoints define permission_classes per API contract.
 """
 
-import logging
-
 from django.core.files.storage import default_storage
 from django.db import IntegrityError
 from django.http import FileResponse, Http404, HttpResponse
@@ -17,9 +15,9 @@ from rest_framework.response import Response
 
 from core.exceptions import DomainError
 from core.permissions import (
+    IsAdmin,
     IsCreator,
     IsApprover,
-    IsCreatorOrApprover,
     IsAuthenticatedReadOnly,
 )
 from apps.payments.models import PaymentBatch, PaymentRequest, SOAVersion
@@ -34,8 +32,6 @@ from apps.payments.serializers import (
     SOAVersionSerializer,
     SOAVersionDetailSerializer,
 )
-
-logger = logging.getLogger(__name__)
 
 
 @api_view(["POST", "GET"])
@@ -232,7 +228,6 @@ def add_request(request, batchId):
     """
     from decimal import Decimal, InvalidOperation
 
-    logger.debug("add_request invoked", extra={"batchId": str(batchId)})
     # Phase 2: Ledger-driven fields
     entity_type = request.data.get("entityType")
     vendor_id = request.data.get("vendorId")
@@ -275,6 +270,7 @@ def add_request(request, batchId):
         pass  # Silently ignore - server will compute
 
     try:
+        idempotency_replay = []
         payment_request = services.add_request(
             batchId,
             request.user.id,
@@ -293,9 +289,13 @@ def add_request(request, batchId):
             extra_amount=extra_amount,
             extra_reason=extra_reason,
             idempotency_key=getattr(request, "idempotency_key", None),
+            _idempotency_replay=idempotency_replay,
         )
         serializer = PaymentRequestSerializer(payment_request)
-        return Response({"data": serializer.data}, status=status.HTTP_201_CREATED)
+        status_code = (
+            status.HTTP_200_OK if idempotency_replay else status.HTTP_201_CREATED
+        )
+        return Response({"data": serializer.data}, status=status_code)
     except DomainError:
         raise
     except IntegrityError:
@@ -527,11 +527,13 @@ def approve_request(request, requestId):
     comment = serializer.validated_data.get("comment")
 
     try:
+        idempotency_replay = []
         payment_request = services.approve_request(
             requestId,
             request.user.id,
             comment,
             idempotency_key=getattr(request, "idempotency_key", None),
+            _idempotency_replay=idempotency_replay,
         )
         detail_serializer = PaymentRequestDetailSerializer(payment_request)
         return Response({"data": detail_serializer.data}, status=status.HTTP_200_OK)
@@ -564,11 +566,13 @@ def reject_request(request, requestId):
     comment = serializer.validated_data.get("comment")
 
     try:
+        idempotency_replay = []
         payment_request = services.reject_request(
             requestId,
             request.user.id,
             comment,
             idempotency_key=getattr(request, "idempotency_key", None),
+            _idempotency_replay=idempotency_replay,
         )
         detail_serializer = PaymentRequestDetailSerializer(payment_request)
         return Response({"data": detail_serializer.data}, status=status.HTTP_200_OK)
@@ -588,7 +592,7 @@ def reject_request(request, requestId):
 
 
 @api_view(["POST"])
-@permission_classes([IsCreatorOrApprover])
+@permission_classes([IsAdmin])
 def mark_paid(request, requestId):
     """
     POST /api/v1/requests/{requestId}/mark-paid
@@ -596,10 +600,12 @@ def mark_paid(request, requestId):
     Mark a PaymentRequest as PAID (APPROVED only).
     """
     try:
+        idempotency_replay = []
         payment_request = services.mark_paid(
             requestId,
             request.user.id,
             idempotency_key=getattr(request, "idempotency_key", None),
+            _idempotency_replay=idempotency_replay,
         )
         detail_serializer = PaymentRequestDetailSerializer(payment_request)
         return Response({"data": detail_serializer.data}, status=status.HTTP_200_OK)

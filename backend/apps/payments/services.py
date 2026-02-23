@@ -9,6 +9,8 @@ Rules:
 - No direct model.save() from views
 """
 
+import logging
+
 from django.db import transaction, IntegrityError
 from django.utils import timezone
 from core.exceptions import (
@@ -18,6 +20,7 @@ from core.exceptions import (
     PermissionDeniedError,
     PreconditionFailedError,
 )
+from core.middleware import get_current_request_id
 from apps.payments.models import (
     PaymentBatch,
     PaymentRequest,
@@ -30,7 +33,8 @@ from apps.payments.state_machine import (
 )
 from apps.payments.versioning import version_locked_update
 from apps.audit.services import create_audit_entry
-from django.db import connection
+
+logger = logging.getLogger(__name__)
 
 
 def create_batch(creator_id, title):
@@ -73,6 +77,15 @@ def create_batch(creator_id, title):
             new_state={"status": "DRAFT", "title": batch.title},
         )
 
+        logger.info(
+            "payment_batch_created",
+            extra={
+                "request_id": get_current_request_id(),
+                "entity_id": str(batch.id),
+                "operation": "BATCH_CREATED",
+                "user_id": str(creator_id),
+            },
+        )
         return batch
 
 
@@ -93,6 +106,7 @@ def add_request(
     extra_amount=None,
     extra_reason=None,
     idempotency_key=None,
+    _idempotency_replay=None,
 ):
     """
     Add a PaymentRequest to a PaymentBatch.
@@ -130,18 +144,26 @@ def add_request(
     from apps.ledger.models import Vendor, Subcontractor, Site
     from apps.payments.models import IdempotencyKey
 
-    # Idempotency check
-    if idempotency_key:
-        existing_key = IdempotencyKey.objects.filter(
-            key=idempotency_key, operation="CREATE_PAYMENT_REQUEST"
-        ).first()
-        if existing_key and existing_key.target_object_id:
-            try:
-                return PaymentRequest.objects.get(id=existing_key.target_object_id)
-            except PaymentRequest.DoesNotExist:
-                pass  # Key exists but object missing, proceed with creation
-
     with transaction.atomic():
+        reservation = None
+        if idempotency_key:
+            try:
+                with transaction.atomic():
+                    reservation = IdempotencyKey.objects.create(
+                        key=idempotency_key,
+                        operation="CREATE_PAYMENT_REQUEST",
+                    )
+            except IntegrityError:
+                existing_key = IdempotencyKey.objects.get(
+                    key=idempotency_key,
+                    operation="CREATE_PAYMENT_REQUEST",
+                )
+                if existing_key.target_object_id:
+                    if _idempotency_replay is not None:
+                        _idempotency_replay.append(True)
+                    return PaymentRequest.objects.get(id=existing_key.target_object_id)
+                reservation = existing_key
+
         try:
             batch = PaymentBatch.objects.select_for_update().get(id=batch_id)
         except PaymentBatch.DoesNotExist:
@@ -314,14 +336,10 @@ def add_request(
 
         request = PaymentRequest.objects.create(**request_data)
 
-        # Store idempotency key if provided
         if idempotency_key:
-            IdempotencyKey.objects.create(
-                key=idempotency_key,
-                operation="CREATE_PAYMENT_REQUEST",
-                target_object_id=request.id,
-                response_code=201,
-            )
+            reservation.target_object_id = request.id
+            reservation.response_code = 201
+            reservation.save(update_fields=["target_object_id", "response_code"])
 
         # Create audit entry
         if is_ledger_driven:
@@ -355,6 +373,15 @@ def add_request(
                 },
             )
 
+        logger.info(
+            "payment_request_added",
+            extra={
+                "request_id": get_current_request_id(),
+                "entity_id": str(request.id),
+                "operation": "CREATE_PAYMENT_REQUEST",
+                "user_id": str(creator_id),
+            },
+        )
         return request
 
 
@@ -624,6 +651,15 @@ def submit_batch(batch_id, creator_id):
             new_state={"status": "PROCESSING"},
         )
 
+        logger.info(
+            "batch_submitted",
+            extra={
+                "request_id": get_current_request_id(),
+                "entity_id": str(batch.id),
+                "operation": "BATCH_SUBMITTED",
+                "user_id": str(creator_id),
+            },
+        )
         return batch
 
 
@@ -683,10 +719,25 @@ def cancel_batch(batch_id, creator_id):
             new_state={"status": "CANCELLED", "completed_at": now.isoformat()},
         )
 
+        logger.info(
+            "batch_cancelled",
+            extra={
+                "request_id": get_current_request_id(),
+                "entity_id": str(batch.id),
+                "operation": "BATCH_CANCELLED",
+                "user_id": str(creator_id),
+            },
+        )
         return batch
 
 
-def approve_request(request_id, approver_id, comment=None, idempotency_key=None):
+def approve_request(
+    request_id,
+    approver_id,
+    comment=None,
+    idempotency_key=None,
+    _idempotency_replay=None,
+):
     """
     Approve a PaymentRequest (PENDING_APPROVAL only).
 
@@ -708,18 +759,26 @@ def approve_request(request_id, approver_id, comment=None, idempotency_key=None)
     from apps.users.models import User, Role
     from apps.payments.models import IdempotencyKey
 
-    # Idempotency check
-    if idempotency_key:
-        existing_key = IdempotencyKey.objects.filter(
-            key=idempotency_key, operation="APPROVE_PAYMENT_REQUEST"
-        ).first()
-        if existing_key and existing_key.target_object_id:
-            try:
-                return PaymentRequest.objects.get(id=existing_key.target_object_id)
-            except PaymentRequest.DoesNotExist:
-                pass  # Key exists but object missing, proceed with approval
-
     with transaction.atomic():
+        reservation = None
+        if idempotency_key:
+            try:
+                with transaction.atomic():
+                    reservation = IdempotencyKey.objects.create(
+                        key=idempotency_key,
+                        operation="APPROVE_PAYMENT_REQUEST",
+                    )
+            except IntegrityError:
+                existing_key = IdempotencyKey.objects.get(
+                    key=idempotency_key,
+                    operation="APPROVE_PAYMENT_REQUEST",
+                )
+                if existing_key.target_object_id:
+                    if _idempotency_replay is not None:
+                        _idempotency_replay.append(True)
+                    return PaymentRequest.objects.get(id=existing_key.target_object_id)
+                reservation = existing_key
+
         try:
             request = PaymentRequest.objects.select_for_update().get(id=request_id)
         except PaymentRequest.DoesNotExist:
@@ -740,14 +799,6 @@ def approve_request(request_id, approver_id, comment=None, idempotency_key=None)
         # If status is APPROVED, this is a duplicate approval → return 409 CONFLICT
         if request.status != "PENDING_APPROVAL":
             if request.status == "APPROVED":
-                # Duplicate approval attempt → return 409 CONFLICT
-                # Idempotency: same key = return success (retry); different key = block
-                if idempotency_key:
-                    existing = IdempotencyKey.objects.filter(
-                        key=idempotency_key, operation="APPROVE_PAYMENT_REQUEST"
-                    ).first()
-                    if existing and existing.target_object_id:
-                        return request
                 raise InvalidStateError("Request has already been approved")
             raise InvalidStateError(
                 f"Cannot approve request with status {request.status}"
@@ -760,6 +811,10 @@ def approve_request(request_id, approver_id, comment=None, idempotency_key=None)
             # ApprovalRecord exists but status still PENDING_APPROVAL (race condition)
             # Return success (idempotency) - status update in progress in another txn
             request.refresh_from_db()
+            if idempotency_key:
+                reservation.target_object_id = request.id
+                reservation.response_code = 200
+                reservation.save(update_fields=["target_object_id", "response_code"])
             return request
 
         # Create ApprovalRecord (with try/except for race condition handling)
@@ -774,6 +829,10 @@ def approve_request(request_id, approver_id, comment=None, idempotency_key=None)
             # Race condition: another transaction created ApprovalRecord
             # Return success (idempotency)
             request.refresh_from_db()
+            if idempotency_key:
+                reservation.target_object_id = request.id
+                reservation.response_code = 200
+                reservation.save(update_fields=["target_object_id", "response_code"])
             return request
 
         # Transition request to APPROVED with version locking
@@ -793,14 +852,10 @@ def approve_request(request_id, approver_id, comment=None, idempotency_key=None)
             )
         request.refresh_from_db()
 
-        # Store idempotency key if provided
         if idempotency_key:
-            IdempotencyKey.objects.create(
-                key=idempotency_key,
-                operation="APPROVE_PAYMENT_REQUEST",
-                target_object_id=request.id,
-                response_code=200,
-            )
+            reservation.target_object_id = request.id
+            reservation.response_code = 200
+            reservation.save(update_fields=["target_object_id", "response_code"])
 
         # Create audit entry
         create_audit_entry(
@@ -812,10 +867,25 @@ def approve_request(request_id, approver_id, comment=None, idempotency_key=None)
             new_state={"status": "APPROVED", "decision": "APPROVED"},
         )
 
+        logger.info(
+            "payment_request_approved",
+            extra={
+                "request_id": get_current_request_id(),
+                "entity_id": str(request.id),
+                "operation": "APPROVE_PAYMENT_REQUEST",
+                "user_id": str(approver_id),
+            },
+        )
         return request
 
 
-def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
+def reject_request(
+    request_id,
+    approver_id,
+    comment=None,
+    idempotency_key=None,
+    _idempotency_replay=None,
+):
     """
     Reject a PaymentRequest (PENDING_APPROVAL only).
 
@@ -837,32 +907,35 @@ def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
     from apps.users.models import User, Role
     from apps.payments.models import IdempotencyKey
 
-    # Idempotency check
-    if idempotency_key:
-        existing_key = IdempotencyKey.objects.filter(
-            key=idempotency_key, operation="REJECT_PAYMENT_REQUEST"
-        ).first()
-        if existing_key and existing_key.target_object_id:
-            try:
-                return PaymentRequest.objects.get(id=existing_key.target_object_id)
-            except PaymentRequest.DoesNotExist:
-                pass  # Key exists but object missing, proceed with rejection
-
-    try:
-        approver = User.objects.get(id=approver_id)
-    except User.DoesNotExist:
-        raise NotFoundError(f"User {approver_id} does not exist")
-
-    # Check role (ADMIN can reject as well)
-    if approver.role not in (Role.APPROVER, Role.ADMIN):
-        raise PermissionDeniedError(
-            "Only users with APPROVER or ADMIN role can reject requests"
-        )
-
     with transaction.atomic():
-        # Set transaction isolation level for financial operations
-        with connection.cursor() as cursor:
-            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        reservation = None
+        if idempotency_key:
+            try:
+                with transaction.atomic():
+                    reservation = IdempotencyKey.objects.create(
+                        key=idempotency_key,
+                        operation="REJECT_PAYMENT_REQUEST",
+                    )
+            except IntegrityError:
+                existing_key = IdempotencyKey.objects.get(
+                    key=idempotency_key,
+                    operation="REJECT_PAYMENT_REQUEST",
+                )
+                if existing_key.target_object_id:
+                    if _idempotency_replay is not None:
+                        _idempotency_replay.append(True)
+                    return PaymentRequest.objects.get(id=existing_key.target_object_id)
+                reservation = existing_key
+
+        try:
+            approver = User.objects.get(id=approver_id)
+        except User.DoesNotExist:
+            raise NotFoundError(f"User {approver_id} does not exist")
+
+        if approver.role not in (Role.APPROVER, Role.ADMIN):
+            raise PermissionDeniedError(
+                "Only users with APPROVER or ADMIN role can reject requests"
+            )
 
         try:
             request = PaymentRequest.objects.select_for_update().get(id=request_id)
@@ -871,18 +944,25 @@ def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
 
         # Check request state
         if request.status != "PENDING_APPROVAL":
-            # Idempotency: if already REJECTED, return success
             if request.status == "REJECTED":
+                if idempotency_key:
+                    reservation.target_object_id = request.id
+                    reservation.response_code = 200
+                    reservation.save(
+                        update_fields=["target_object_id", "response_code"]
+                    )
                 return request
             raise InvalidStateError(
                 f"Cannot reject request with status {request.status}"
             )
 
         # Check if ApprovalRecord already exists (idempotency)
-        # Use exists() not hasattr() for reliability in concurrent scenarios
         if ApprovalRecord.objects.filter(payment_request=request).exists():
-            # ApprovalRecord already exists - return success (idempotency)
             request.refresh_from_db()
+            if idempotency_key:
+                reservation.target_object_id = request.id
+                reservation.response_code = 200
+                reservation.save(update_fields=["target_object_id", "response_code"])
             return request
 
         # Create ApprovalRecord (with try/except for race condition handling)
@@ -894,9 +974,11 @@ def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
                 comment=comment.strip() if comment else None,
             )
         except IntegrityError:
-            # Race condition: another transaction created ApprovalRecord
-            # Return success (idempotency)
             request.refresh_from_db()
+            if idempotency_key:
+                reservation.target_object_id = request.id
+                reservation.response_code = 200
+                reservation.save(update_fields=["target_object_id", "response_code"])
             return request
 
         # Transition request to REJECTED with version locking
@@ -916,14 +998,10 @@ def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
             )
         request.refresh_from_db()
 
-        # Store idempotency key if provided
         if idempotency_key:
-            IdempotencyKey.objects.create(
-                key=idempotency_key,
-                operation="REJECT_PAYMENT_REQUEST",
-                target_object_id=request.id,
-                response_code=200,
-            )
+            reservation.target_object_id = request.id
+            reservation.response_code = 200
+            reservation.save(update_fields=["target_object_id", "response_code"])
 
         # Create audit entry
         create_audit_entry(
@@ -935,10 +1013,19 @@ def reject_request(request_id, approver_id, comment=None, idempotency_key=None):
             new_state={"status": "REJECTED", "decision": "REJECTED"},
         )
 
+        logger.info(
+            "payment_request_rejected",
+            extra={
+                "request_id": get_current_request_id(),
+                "entity_id": str(request.id),
+                "operation": "REJECT_PAYMENT_REQUEST",
+                "user_id": str(approver_id),
+            },
+        )
         return request
 
 
-def mark_paid(request_id, actor_id, idempotency_key=None):
+def mark_paid(request_id, actor_id, idempotency_key=None, _idempotency_replay=None):
     """
     Mark a PaymentRequest as PAID (APPROVED only).
 
@@ -958,32 +1045,35 @@ def mark_paid(request_id, actor_id, idempotency_key=None):
     from apps.users.models import User
     from apps.payments.models import IdempotencyKey
 
-    # Idempotency check
-    if idempotency_key:
-        existing_key = IdempotencyKey.objects.filter(
-            key=idempotency_key, operation="MARK_PAYMENT_PAID"
-        ).first()
-        if existing_key and existing_key.target_object_id:
-            try:
-                return PaymentRequest.objects.get(id=existing_key.target_object_id)
-            except PaymentRequest.DoesNotExist:
-                pass  # Key exists but object missing, proceed with mark_paid
-
-    try:
-        actor = User.objects.get(id=actor_id)
-    except User.DoesNotExist:
-        raise NotFoundError(f"User {actor_id} does not exist")
-
-    # Check role (ADMIN can mark paid, consistent with approve/reject)
-    if actor.role not in ("CREATOR", "APPROVER", "ADMIN"):
-        raise PermissionDeniedError(
-            "Only CREATOR, APPROVER, or ADMIN can mark requests as paid"
-        )
-
     with transaction.atomic():
-        # Set transaction isolation level for financial operations
-        with connection.cursor() as cursor:
-            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        reservation = None
+        if idempotency_key:
+            try:
+                with transaction.atomic():
+                    reservation = IdempotencyKey.objects.create(
+                        key=idempotency_key,
+                        operation="MARK_PAYMENT_PAID",
+                    )
+            except IntegrityError:
+                existing_key = IdempotencyKey.objects.get(
+                    key=idempotency_key,
+                    operation="MARK_PAYMENT_PAID",
+                )
+                if existing_key.target_object_id:
+                    if _idempotency_replay is not None:
+                        _idempotency_replay.append(True)
+                    return PaymentRequest.objects.get(id=existing_key.target_object_id)
+                reservation = existing_key
+
+        try:
+            actor = User.objects.get(id=actor_id)
+        except User.DoesNotExist:
+            raise NotFoundError(f"User {actor_id} does not exist")
+
+        if actor.role not in ("CREATOR", "APPROVER", "ADMIN"):
+            raise PermissionDeniedError(
+                "Only CREATOR, APPROVER, or ADMIN can mark requests as paid"
+            )
 
         try:
             request = PaymentRequest.objects.select_for_update().get(id=request_id)
@@ -992,8 +1082,13 @@ def mark_paid(request_id, actor_id, idempotency_key=None):
 
         # Check request state
         if request.status != "APPROVED":
-            # Idempotency: if already PAID, return success
             if request.status == "PAID":
+                if idempotency_key:
+                    reservation.target_object_id = request.id
+                    reservation.response_code = 200
+                    reservation.save(
+                        update_fields=["target_object_id", "response_code"]
+                    )
                 return request
             raise InvalidStateError(
                 f"Cannot mark paid request with status {request.status}"
@@ -1016,14 +1111,10 @@ def mark_paid(request_id, actor_id, idempotency_key=None):
             )
         request.refresh_from_db()
 
-        # Store idempotency key if provided
         if idempotency_key:
-            IdempotencyKey.objects.create(
-                key=idempotency_key,
-                operation="MARK_PAYMENT_PAID",
-                target_object_id=request.id,
-                response_code=200,
-            )
+            reservation.target_object_id = request.id
+            reservation.response_code = 200
+            reservation.save(update_fields=["target_object_id", "response_code"])
 
         # Create audit entry
         create_audit_entry(
@@ -1035,6 +1126,15 @@ def mark_paid(request_id, actor_id, idempotency_key=None):
             new_state={"status": "PAID"},
         )
 
+        logger.info(
+            "payment_request_mark_paid",
+            extra={
+                "request_id": get_current_request_id(),
+                "entity_id": str(request.id),
+                "operation": "MARK_PAYMENT_PAID",
+                "user_id": str(actor_id),
+            },
+        )
         # Check if batch should transition to COMPLETED
         batch = request.batch
         if batch.status == "PROCESSING":
@@ -1062,6 +1162,15 @@ def mark_paid(request_id, actor_id, idempotency_key=None):
                     },
                 )
 
+                logger.info(
+                    "batch_completed",
+                    extra={
+                        "request_id": get_current_request_id(),
+                        "entity_id": str(batch.id),
+                        "operation": "BATCH_COMPLETED",
+                        "user_id": None,
+                    },
+                )
                 # Auto-generate SOA when batch completes (original canonical flow)
                 generate_soa_for_batch(batch.id)
 
@@ -1230,4 +1339,13 @@ def generate_soa_for_batch(batch_id):
             },
         )
 
+        logger.info(
+            "soa_generated",
+            extra={
+                "request_id": get_current_request_id(),
+                "entity_id": str(batch.id),
+                "operation": "SOA_GENERATED",
+                "user_id": None,
+            },
+        )
     return created

@@ -35,13 +35,16 @@ def fail(msg):
 
 
 def should_scan(path: Path):
-    """Strict filter to exclude virtualenv and framework code"""
+    """Strict filter to exclude virtualenv, framework code, and test code."""
     path_str = str(path)
     if ".venv" in path_str or "site-packages" in path_str:
         return False
     if "__pycache__" in path_str:
         return False
     if "migrations" in path_str:
+        return False
+    # Tests are exempt from service-layer enforcement (they set up state directly).
+    if "/tests/" in path_str:
         return False
     return True
 

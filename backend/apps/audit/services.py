@@ -8,7 +8,13 @@ from apps.audit.models import AuditLog
 
 
 def create_audit_entry(
-    event_type, actor_id, entity_type, entity_id, previous_state=None, new_state=None
+    event_type,
+    actor_id,
+    entity_type,
+    entity_id,
+    previous_state=None,
+    new_state=None,
+    request_id=None,
 ):
     """
     Create an audit log entry.
@@ -20,11 +26,16 @@ def create_audit_entry(
         entity_id: Identifier of affected entity
         previous_state: Serialized state before change (optional)
         new_state: Serialized state after change (optional)
+        request_id: Correlation ID from HTTP layer (optional; from context if None)
 
     Returns:
         AuditLog: Created audit log entry
     """
     from apps.users.models import User
+    from core.middleware import get_current_request_id
+
+    if request_id is None:
+        request_id = get_current_request_id()
 
     actor = None
     if actor_id:
@@ -41,6 +52,7 @@ def create_audit_entry(
         entity_id=entity_id,
         previous_state=previous_state,
         new_state=new_state,
+        request_id=request_id,
     )
 
     return audit_entry
