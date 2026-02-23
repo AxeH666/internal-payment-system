@@ -91,7 +91,7 @@ jobs:
           POSTGRES_DB: testdb
         run: |
           cd backend
-          coverage run manage.py test
+          coverage run --branch manage.py test
           coverage report --fail-under=85
           coverage xml
 

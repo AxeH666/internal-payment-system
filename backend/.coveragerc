@@ -1,8 +1,9 @@
 [run]
-source = .
+source =
+    apps
+    core
 omit =
     */migrations/*
-    manage.py
     */tests/*
 
 [report]
