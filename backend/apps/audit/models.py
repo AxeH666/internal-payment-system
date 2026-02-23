@@ -22,6 +22,7 @@ class AuditLog(models.Model):
     )
     entity_type = models.CharField(max_length=50)
     entity_id = models.UUIDField()
+    request_id = models.CharField(max_length=64, null=True, blank=True)
     previous_state = models.JSONField(null=True, blank=True)
     new_state = models.JSONField(null=True, blank=True)
     occurred_at = models.DateTimeField(auto_now_add=True)
