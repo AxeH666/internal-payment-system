@@ -41,14 +41,10 @@ class AuthoritySmokeTests(TestCase):
             HTTP_IDEMPOTENCY_KEY="authority-test-no-admin-via-api",
         )
         self.assertEqual(r.status_code, 400, r.data)
-        # DRF serializer validation returns field errors or error wrapper
-        msg = r.data.get("error", {}).get("message", "") or str(r.data)
-        role_msgs = r.data.get("role", [])
-        if isinstance(role_msgs, list):
-            msg = msg + " " + " ".join(role_msgs)
-        self.assertIn(
+        # Validation errors live in error.details (structured error contract)
+        self.assertEqual(
+            r.data["error"]["details"]["role"][0],
             "Cannot create ADMIN users via API",
-            msg,
-            f"Expected ADMIN creation rejection message; got: {r.data}",
+            f"Expected ADMIN creation rejection in details.role; got: {r.data}",
         )
         self.assertFalse(User.objects.filter(username="would_be_admin").exists())
