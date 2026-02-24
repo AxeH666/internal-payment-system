@@ -5,6 +5,9 @@ source =
 omit =
     */migrations/*
     */tests/*
+    */asgi.py
+    */wsgi.py
+    */management/commands/*
 
 [report]
 exclude_lines =
