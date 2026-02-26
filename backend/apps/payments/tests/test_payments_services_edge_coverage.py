@@ -37,7 +37,7 @@ from apps.users.models import User
 
 
 class VersionLockConflictTests(TestCase):
-    """Version lock conflict branches (updated_count == 0) in approve/reject/mark_paid."""
+    """Version lock conflict (updated_count == 0) in approve/reject/mark_paid."""
 
     def setUp(self):
         self.creator = User.objects.create_user(
@@ -77,7 +77,7 @@ class VersionLockConflictTests(TestCase):
         self.req.refresh_from_db()
 
     def test_approve_version_lock_conflict_raises_invalid_state(self):
-        """When version_locked_update returns 0, approve_request raises InvalidStateError."""
+        """version_locked_update returns 0 → approve raises InvalidStateError."""
         with patch(
             "apps.payments.services.version_locked_update",
             return_value=0,
@@ -92,7 +92,7 @@ class VersionLockConflictTests(TestCase):
             self.assertIn("Concurrent modification", str(ctx.exception.message))
 
     def test_reject_version_lock_conflict_raises_invalid_state(self):
-        """When version_locked_update returns 0, reject_request raises InvalidStateError."""
+        """version_locked_update returns 0 → reject_request raises InvalidStateError."""
         with patch(
             "apps.payments.services.version_locked_update",
             return_value=0,
@@ -184,7 +184,7 @@ class BatchCompletionLogicTests(TestCase):
         self.req2.refresh_from_db()
 
     def test_mark_paid_when_not_all_terminal_batch_stays_processing(self):
-        """Mark one request PAID; other still PENDING_APPROVAL → batch stays PROCESSING."""
+        """One PAID, other PENDING_APPROVAL → batch stays PROCESSING."""
         services.approve_request(
             self.req1.id, self.approver.id, idempotency_key="bc-approve-1"
         )
@@ -224,7 +224,7 @@ class BatchCompletionLogicTests(TestCase):
         )
         services.mark_paid(self.req1.id, self.admin.id, idempotency_key="bc-sga-mp1")
         services.mark_paid(self.req2.id, self.admin.id, idempotency_key="bc-sga-mp2")
-        # mark_paid already triggered generate_soa_for_batch; calling again is idempotent
+        # generate_soa_for_batch already run by mark_paid; second call idempotent
         second = services.generate_soa_for_batch(self.batch.id)
         self.assertEqual(second, [])
 
@@ -499,7 +499,7 @@ class IdempotencyReplayServiceTests(TestCase):
         self.assertEqual(paid_audits.count(), 1)
 
     def test_submit_already_submitted_batch_raises_invalid_state(self):
-        """Submit batch when already PROCESSING → InvalidStateError (setUp already submitted)."""
+        """Submit batch when already PROCESSING → InvalidStateError."""
         with self.assertRaises(InvalidStateError):
             services.submit_batch(self.batch.id, self.creator.id)
 
@@ -780,8 +780,6 @@ class ServiceConflictAndValidationTests(TestCase):
 
     def test_upload_soa_no_file_raises_validation_error(self):
         """upload_soa with no file → ValidationError."""
-        from django.core.files.base import ContentFile
-
         with self.assertRaises(ValidationError):
             services.upload_soa(
                 self.batch.id,
@@ -895,7 +893,7 @@ class UpdateRequestFullPathTests(TestCase):
         )
 
     def test_update_request_success_all_fields_creates_audit(self):
-        """update_request with amount, currency, beneficiary, purpose → audit REQUEST_UPDATED."""
+        """update_request with all fields → audit REQUEST_UPDATED."""
         updated = services.update_request(
             self.req.id,
             self.batch.id,
@@ -991,7 +989,7 @@ class CancelBatchMissingBranchesTests(TestCase):
 
 
 class SubmitBatchMissingBranchesTests(TestCase):
-    """submit_batch: idempotent when already SUBMITTED, PreconditionFailed ledger/legacy."""
+    """submit_batch: idempotent when SUBMITTED; PreconditionFailed for ledger/legacy."""
 
     def setUp(self):
         self.creator = User.objects.create_user(
@@ -1006,7 +1004,7 @@ class SubmitBatchMissingBranchesTests(TestCase):
         )
 
     def test_submit_batch_idempotent_when_already_submitted_returns_batch(self):
-        """submit_batch when batch is already SUBMITTED (before PROCESSING) → return batch."""
+        """submit_batch when already SUBMITTED → returns batch (idempotent)."""
         from django.utils import timezone
 
         PaymentBatch.objects.filter(id=self.batch.id).update(
@@ -1021,7 +1019,7 @@ class SubmitBatchMissingBranchesTests(TestCase):
     def test_submit_batch_legacy_request_missing_required_fields_raises_precondition(
         self,
     ):
-        """submit_batch when a request has empty beneficiary_name → PreconditionFailedError."""
+        """submit_batch with empty beneficiary_name → PreconditionFailedError."""
         PaymentRequest.objects.create(
             batch=self.batch,
             status="DRAFT",
@@ -1038,7 +1036,7 @@ class SubmitBatchMissingBranchesTests(TestCase):
 
 
 class ApproveRequestMissingBranchesTests(TestCase):
-    """approve_request: ApprovalRecord already exists (idempotent), IntegrityError race."""
+    """approve_request: existing ApprovalRecord (idempotent), IntegrityError race."""
 
     def setUp(self):
         self.creator = User.objects.create_user(
@@ -1070,7 +1068,7 @@ class ApproveRequestMissingBranchesTests(TestCase):
         self.req.refresh_from_db()
 
     def test_approve_when_approval_record_exists_returns_request_idempotent(self):
-        """ApprovalRecord already exists for request → approve returns request (no duplicate)."""
+        """ApprovalRecord exists → approve returns request (idempotent)."""
         ApprovalRecord.objects.create(
             payment_request=self.req,
             approver=self.approver,
@@ -1144,13 +1142,13 @@ class RejectRequestMissingBranchesTests(TestCase):
             )
 
     def test_reject_when_approval_record_exists_returns_request_idempotent(self):
-        """ApprovalRecord already exists (request still PENDING_APPROVAL) → reject returns request."""
+        """ApprovalRecord exists (PENDING_APPROVAL) → reject returns request."""
         ApprovalRecord.objects.create(
             payment_request=self.req,
             approver=self.approver,
             decision="REJECTED",
         )
-        # Request still PENDING_APPROVAL; reject_request sees existing record and returns
+        # Existing record; reject_request returns request idempotently
         r = services.reject_request(
             self.req.id,
             self.approver.id,
@@ -1362,8 +1360,6 @@ class UploadSoaMissingBranchesTests(TestCase):
 
     def test_upload_soa_wrong_batch_raises_not_found(self):
         """upload_soa with request not in given batch → NotFoundError."""
-        import uuid
-
         from django.core.files.base import ContentFile
 
         other_batch = PaymentBatch.objects.create(

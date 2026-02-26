@@ -795,7 +795,7 @@ def export_batch_soa(request, batchId):
             {
                 "error": {
                     "code": "VALIDATION_ERROR",
-                    "message": "Format must be 'pdf' or 'excel' (use query param export=)",
+                    "message": "Format must be 'pdf' or 'excel' (query param: export=)",
                     "details": {},
                 }
             },

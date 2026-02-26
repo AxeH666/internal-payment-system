@@ -9,7 +9,7 @@ import uuid
 from decimal import Decimal
 from io import BytesIO
 
-from django.test import RequestFactory, TestCase
+from django.test import TestCase
 from django.urls import resolve, reverse
 from django.utils import timezone
 from rest_framework import status
@@ -505,7 +505,7 @@ class PaymentsViewsCoverageTests(TestCase):
 
     # --- Export format validation ---
     def test_export_batch_soa_invalid_format_400(self):
-        """Export with invalid format → 400. View uses query param export= (not format=)."""
+        """Export with invalid format → 400. Uses query param export=."""
         from django.urls import reverse
 
         self.client.force_authenticate(user=self.creator)
@@ -682,8 +682,7 @@ class PaymentsViewsFinalCoverageTests(PaymentsViewsCoverageTests):
     def test_create_batch_missing_idempotency_and_wrong_role(self):
         """
         POST /batches as VIEWER without Idempotency-Key.
-        Depending on middleware ordering this can return 400 (idempotency) or 403 (permissions);
-        both outcomes are accepted here.
+        Can return 400 (idempotency) or 403 (permissions); both accepted.
         """
         self.client.force_authenticate(user=self.viewer)
         r = self.client.post(
@@ -788,9 +787,11 @@ class PaymentsViewsFinalCoverageTests(PaymentsViewsCoverageTests):
             self.batch.id, self.req.id, self.creator.id, f
         )
 
-        r = self.client.get(
-            f"/api/v1/batches/{self.batch.id}/requests/{self.req.id}/soa/{soa_version.id}/download"
+        path = (
+            f"/api/v1/batches/{self.batch.id}/requests/{self.req.id}"
+            f"/soa/{soa_version.id}/download"
         )
+        r = self.client.get(path)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertIn("attachment", r["Content-Disposition"])
 
@@ -804,9 +805,11 @@ class PaymentsViewsFinalCoverageTests(PaymentsViewsCoverageTests):
             source=SOAVersion.SOURCE_UPLOAD,
             uploaded_by=self.creator,
         )
-        r = self.client.get(
-            f"/api/v1/batches/{self.batch.id}/requests/{self.req.id}/soa/{missing_soa.id}/download"
+        path = (
+            f"/api/v1/batches/{self.batch.id}/requests/{self.req.id}"
+            f"/soa/{missing_soa.id}/download"
         )
+        r = self.client.get(path)
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_export_batch_soa_pdf_returns_200(self):
@@ -829,8 +832,7 @@ class PaymentsViewsFinalCoverageTests(PaymentsViewsCoverageTests):
             status="DRAFT",
         )
 
-        # Route resolves; client.get() 404 in test env (routing). Hit export success path
-        # by calling soa_export directly (same code the view uses).
+        # Hit export success path by calling soa_export directly (same as view).
         url = reverse("payments:export-batch-soa", kwargs={"batchId": batch.id})
         self.assertEqual(resolve(url).view_name, "payments:export-batch-soa")
         content, filename = export_batch_soa_pdf(batch.id)
@@ -839,7 +841,7 @@ class PaymentsViewsFinalCoverageTests(PaymentsViewsCoverageTests):
         self.assertTrue(filename.endswith(".pdf"))
 
     def test_export_batch_soa_excel_returns_200(self):
-        """Export SOA as Excel — self-contained: create batch and request in this test."""
+        """Export SOA as Excel; creates batch and request in test."""
         self.client.force_authenticate(self.creator)
 
         batch = PaymentBatch.objects.create(

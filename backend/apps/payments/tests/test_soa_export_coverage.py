@@ -1,9 +1,8 @@
 """
 STEP 5C — SOA export coverage.
 
-API-level tests for GET /api/v1/batches/{batch_id}/soa-export?format=pdf|excel.
-Uses real DB, no mocking. Covers soa_export.py (export_batch_soa_pdf, export_batch_soa_excel).
-View export_batch_soa is covered in test_payments_views_coverage.py.
+GET /api/v1/batches/{batch_id}/soa-export?export=pdf|excel. Real DB.
+Covers soa_export.py; view in test_payments_views_coverage.py.
 """
 
 from decimal import Decimal
@@ -16,7 +15,7 @@ from apps.users.models import User
 
 
 class SOAExportCoverageTests(TestCase):
-    """SOA export PDF and Excel — soa_export.py branch coverage (real DB, no mocking)."""
+    """SOA export PDF/Excel — soa_export.py branch coverage, real DB."""
 
     def setUp(self):
         self.user = User.objects.create_user(
@@ -114,7 +113,7 @@ class SOAExportCoverageTests(TestCase):
             purpose="P1",
             amount=Decimal("10.00"),
         )
-        r2 = PaymentRequest.objects.create(
+        PaymentRequest.objects.create(
             batch=batch,
             status="DRAFT",
             currency="USD",
