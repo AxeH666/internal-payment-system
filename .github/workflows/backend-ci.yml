@@ -55,6 +55,20 @@ jobs:
           cd backend
           python manage.py makemigrations --check --dry-run
 
+      - name: Validate migration graph
+        env:
+          DJANGO_SETTINGS_MODULE: core.settings
+          SECRET_KEY: ci-secret-key-min-32-chars
+          DEBUG: "True"
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testdb
+        run: |
+          cd backend
+          python manage.py showmigrations --plan
+
       - name: Verify no unapplied migrations
         env:
           DJANGO_SETTINGS_MODULE: core.settings
