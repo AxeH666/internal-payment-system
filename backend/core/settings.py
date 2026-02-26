@@ -120,6 +120,27 @@ if DJANGO_ENV == "production" and DATABASES["default"]["ENGINE"].endswith("postg
     DATABASES["default"].setdefault("OPTIONS", {})
     DATABASES["default"]["OPTIONS"].setdefault("sslmode", "require")
 
+# ------------------------------------------------------------------
+# Phase 3.6 — Transaction Safety Timeouts (PostgreSQL only)
+# ------------------------------------------------------------------
+
+if DATABASES["default"]["ENGINE"].endswith("postgresql"):
+    DATABASES["default"].setdefault("OPTIONS", {})
+
+    # Do not overwrite existing options (e.g., sslmode)
+    existing_options = DATABASES["default"]["OPTIONS"].get("options", "")
+
+    timeout_options = (
+        "-c statement_timeout=15000 "
+        "-c idle_in_transaction_session_timeout=10000 "
+        "-c lock_timeout=5000"
+    )
+
+    # Append safely if options already exist
+    DATABASES["default"]["OPTIONS"][
+        "options"
+    ] = f"{existing_options} {timeout_options}".strip()
+
 # ============================================================================
 # CACHE - Redis in production, LocMem for dev/CI (throttling + future use)
 # ============================================================================
