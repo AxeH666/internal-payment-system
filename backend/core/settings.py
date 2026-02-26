@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     "apps.payments",
     "apps.audit",
     "apps.auth.apps.AuthConfig",
+    "health",
 ]
 
 MIDDLEWARE = [
