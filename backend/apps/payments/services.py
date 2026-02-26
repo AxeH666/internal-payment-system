@@ -706,6 +706,7 @@ def cancel_batch(batch_id, creator_id):
             raise InvalidStateError(f"Cannot cancel batch with status {batch.status}")
         now = timezone.now()
         batch.status = "CANCELLED"
+        batch.submitted_at = now  # Constraint: non-DRAFT requires submitted_at
         batch.completed_at = now
         batch.save()
 

@@ -365,15 +365,15 @@ def get_or_update_request(request, batchId, requestId):
 
         if "amount" in request.data:
             try:
-                from decimal import Decimal
+                from decimal import Decimal, InvalidOperation
 
                 update_fields["amount"] = Decimal(str(request.data["amount"]))
-            except (ValueError, TypeError):
+            except (InvalidOperation, ValueError, TypeError):
                 return Response(
                     {
                         "error": {
                             "code": "VALIDATION_ERROR",
-                            "message": "Invalid amount format",
+                            "message": "Invalid amount",
                             "details": {},
                         }
                     },
@@ -783,18 +783,19 @@ def download_soa_document(request, batchId, requestId, versionId):
 @permission_classes([IsAuthenticatedReadOnly])
 def export_batch_soa(request, batchId):
     """
-    GET /api/v1/batches/{batchId}/soa-export?format=pdf|excel
+    GET /api/v1/batches/{batchId}/soa-export?export=pdf|excel
 
     Export batch SOA as PDF or Excel (immutable snapshot).
-    Phase 3: SOA versioned export.
+    Uses query param 'export' (not 'format') to avoid DRF content negotiation
+    treating ?format=pdf as a response format and raising Http404.
     """
-    format_param = request.query_params.get("format", "pdf").lower()
+    format_param = request.query_params.get("export", "pdf").lower()
     if format_param not in ("pdf", "excel"):
         return Response(
             {
                 "error": {
                     "code": "VALIDATION_ERROR",
-                    "message": "Format must be 'pdf' or 'excel'",
+                    "message": "Format must be 'pdf' or 'excel' (use query param export=)",
                     "details": {},
                 }
             },
