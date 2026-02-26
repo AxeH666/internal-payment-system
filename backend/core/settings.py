@@ -26,25 +26,25 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 # ============================================================================
-# SECURITY SETTINGS - FROM ENVIRONMENT, NO HARDCODED CREDENTIALS
+# ENVIRONMENT & SECURITY - CORE SETTINGS
 # ============================================================================
+
+DJANGO_ENV = os.environ.get("DJANGO_ENV", "development")
 
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
-    raise ValueError(
-        "SECRET_KEY environment variable is required. "
-        "Set it in project root .env (docker compose), backend/.env (local runs), "
-        "or export it."
-    )
+    raise Exception("SECRET_KEY must be set via environment variable")
 
-DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
+DEBUG = os.environ.get("DEBUG", "False") == "True"
+if DJANGO_ENV == "production" and DEBUG:
+    raise Exception("DEBUG cannot be True in production")
 
-# ALLOWED_HOSTS: environment-aware configuration
-ALLOWED_HOSTS = (
-    [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()]
-    if os.environ.get("ALLOWED_HOSTS")
-    else []
-)
+# ALLOWED_HOSTS: environment-aware configuration with production enforcement
+_raw_allowed_hosts = os.environ.get("ALLOWED_HOSTS", "")
+ALLOWED_HOSTS = [h.strip() for h in _raw_allowed_hosts.split(",") if h.strip()]
+
+if DJANGO_ENV == "production" and not ALLOWED_HOSTS:
+    raise Exception("ALLOWED_HOSTS must be set in production")
 
 
 # Application definition
@@ -115,6 +115,29 @@ DATABASES = {
     }
 }
 
+# Enforce SSL for managed Postgres in production
+if DJANGO_ENV == "production" and DATABASES["default"]["ENGINE"].endswith("postgresql"):
+    DATABASES["default"].setdefault("OPTIONS", {})
+    DATABASES["default"]["OPTIONS"].setdefault("sslmode", "require")
+
+# ============================================================================
+# CACHE - Redis in production, LocMem for dev/CI (throttling + future use)
+# ============================================================================
+
+REDIS_URL = os.environ.get("REDIS_URL")
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
@@ -176,6 +199,16 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "core.exceptions.domain_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 50,
+    "DEFAULT_THROTTLE_CLASSES": [
+        "core.throttling.MutationUserThrottle",
+        "core.throttling.IdempotencyThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "mutation_user": "200/hour",
+        "idempotency": "300/hour",
+        "anon": "100/hour",
+    },
 }
 
 # JWT Configuration
@@ -213,22 +246,43 @@ STATIC_ROOT = os.environ.get("STATIC_ROOT", str(BASE_DIR / "staticfiles"))
 # HTTPS enforcement (set via environment)
 HTTPS_ENFORCED = os.environ.get("HTTPS_ENFORCED", "False").lower() == "true"
 SECURE_SSL_REDIRECT = HTTPS_ENFORCED
-SESSION_COOKIE_SECURE = HTTPS_ENFORCED
-CSRF_COOKIE_SECURE = HTTPS_ENFORCED
 SECURE_PROXY_SSL_HEADER = (
     ("HTTP_X_FORWARDED_PROTO", "https") if HTTPS_ENFORCED else None
 )
+
+# Secure cookie configuration (safe for all environments)
+SESSION_COOKIE_SECURE = DJANGO_ENV == "production"
+CSRF_COOKIE_SECURE = DJANGO_ENV == "production"
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
 
 # Security headers
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 
+# HSTS when production + HTTPS enforced (e.g. behind nginx)
+if DJANGO_ENV == "production" and HTTPS_ENFORCED:
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+# ============================================================================
+# CORS CONFIGURATION (if django-cors-headers is installed)
+# ============================================================================
+
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 # ============================================================================
 # LOGGING CONFIGURATION - Structured JSON Logging
 # ============================================================================
 
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+LOG_LEVEL = "INFO" if DJANGO_ENV == "production" else "DEBUG"
 
 
 class JSONFormatter(logging.Formatter):
@@ -315,3 +369,19 @@ LOGGING = {
 
 # Configure logging
 logging.config.dictConfig(LOGGING)
+
+# ============================================================================
+# FAIL-FAST PRODUCTION SAFETY GUARD
+# ============================================================================
+
+if DJANGO_ENV == "production":
+    required_vars = [
+        "SECRET_KEY",
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_HOST",
+    ]
+    for var in required_vars:
+        if not os.environ.get(var):
+            raise Exception(f"{var} must be set in production")
