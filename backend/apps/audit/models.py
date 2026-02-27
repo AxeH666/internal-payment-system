@@ -8,6 +8,23 @@ import uuid
 from django.db import models
 
 
+class AuditLogQuerySet(models.QuerySet):
+    def update(self, *args, **kwargs):
+        raise ValueError(
+            "AuditLog entries are immutable. Bulk updates are not allowed."
+        )
+
+    def delete(self):
+        raise ValueError(
+            "AuditLog entries are immutable. Bulk deletions are not allowed."
+        )
+
+
+class AuditLogManager(models.Manager):
+    def get_queryset(self):
+        return AuditLogQuerySet(self.model, using=self._db)
+
+
 class AuditLog(models.Model):
     """AuditLog model - immutable audit trail."""
 
@@ -26,6 +43,8 @@ class AuditLog(models.Model):
     previous_state = models.JSONField(null=True, blank=True)
     new_state = models.JSONField(null=True, blank=True)
     occurred_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AuditLogManager()
 
     class Meta:
         db_table = "audit_logs"
