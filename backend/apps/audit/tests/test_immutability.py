@@ -9,7 +9,9 @@ class AuditLogImmutabilityTests(TestCase):
     def setUp(self):
         User = get_user_model()
         self.user = User.objects.create_user(
-            email="test@example.com", password="password123"
+            username="audit_test_user",
+            email="test@example.com",
+            password="password123",
         )
 
         self.log = AuditLog.objects.create(
