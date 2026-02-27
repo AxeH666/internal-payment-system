@@ -1,27 +1,29 @@
-import pytest
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+import uuid
 
 from apps.audit.models import AuditLog
 
 
-@pytest.mark.django_db
-def test_audit_log_bulk_update_blocked():
-    log = AuditLog.objects.create(
-        event_type="TEST",
-        entity_type="X",
-        entity_id="00000000-0000-0000-0000-000000000000",
-    )
+class AuditLogImmutabilityTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            email="test@example.com", password="password123"
+        )
 
-    with pytest.raises(ValueError):
-        AuditLog.objects.filter(pk=log.pk).update(event_type="HACK")
+        self.log = AuditLog.objects.create(
+            event_type="TEST_EVENT",
+            actor=self.user,
+            entity_type="TestEntity",
+            entity_id=uuid.uuid4(),
+            request_id="test-request-id",
+        )
 
+    def test_bulk_update_is_blocked(self):
+        with self.assertRaises(ValueError):
+            AuditLog.objects.filter(pk=self.log.pk).update(event_type="MODIFIED")
 
-@pytest.mark.django_db
-def test_audit_log_bulk_delete_blocked():
-    log = AuditLog.objects.create(
-        event_type="TEST",
-        entity_type="X",
-        entity_id="00000000-0000-0000-0000-000000000000",
-    )
-
-    with pytest.raises(ValueError):
-        AuditLog.objects.filter(pk=log.pk).delete()
+    def test_bulk_delete_is_blocked(self):
+        with self.assertRaises(ValueError):
+            AuditLog.objects.filter(pk=self.log.pk).delete()
