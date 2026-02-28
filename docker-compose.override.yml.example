@@ -1,0 +1,24 @@
+# Docker Compose Override for Development
+# Copy this file to docker-compose.override.yml for local development
+# This file is automatically loaded by docker-compose and allows you to override
+# production settings without modifying docker-compose.yml
+
+version: '3.8'
+
+services:
+  backend:
+    # Override command for development (runserver instead of gunicorn)
+    command: >
+      sh -c "
+        python manage.py migrate &&
+        python manage.py runserver 0.0.0.0:8000
+      "
+    # Mount source code for hot reload
+    volumes:
+      - ./backend:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    # Enable debug mode
+    environment:
+      - DEBUG=True
+      - LOG_LEVEL=DEBUG

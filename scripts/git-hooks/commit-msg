@@ -1,0 +1,8 @@
+#!/bin/sh
+pattern='^(feat|fix|refactor|chore|test|docs|perf|ci|revert)(\(.+\))?: .+'
+if ! grep -qE "$pattern" "$1"; then
+  echo "Invalid commit message."
+  echo "Use format:"
+  echo "type(scope): description"
+  exit 1
+fi

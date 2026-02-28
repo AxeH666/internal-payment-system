@@ -44,7 +44,7 @@ def check_git():
         else:
             print("  [OK] Working directory clean")
             return True
-    except Exception as e:
+    except Exception:
         print("  [FAIL] Git not initialized or not accessible")
         return False
 
