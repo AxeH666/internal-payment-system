@@ -68,3 +68,46 @@ This contract is binding upon all engineering personnel contributing to the Inte
 ---
 
 *Document issued under Architecture Governor authority.*
+
+---
+
+## 6. API Contract v2.0 Freeze
+
+**Freeze Date:** 2026-03-01
+**Contract Version:** v2.0
+**Git Tag:** v1.0.0-api-freeze
+**Previous Contract Version:** v1.0 (2025-02-11)
+
+### 6.1 Scope
+
+The API contract specification (`04_API_CONTRACT.md`) has been updated to v2.0 and is hereby frozen. All endpoints, schemas, permissions, and versioning policy documented in v2.0 are immutable under this contract.
+
+### 6.2 Changes from v1.0 to v2.0
+
+1. ADMIN role added to all role tables and permission definitions.
+2. `mark-paid` permission corrected from CREATOR/APPROVER to ADMIN-only.
+3. `POST /api/v1/users` endpoint added — ADMIN-only user creation.
+4. Phase 2 ledger fields added to PaymentRequest response schema: entityType, vendorId, subcontractorId, siteId, baseAmount, extraAmount, totalAmount, entityName, siteCode.
+5. Reference Data section added — all 10 ledger endpoints fully documented.
+6. `GET .../soa/{versionId}/download` endpoint added — file binary download, audits SOA_DOWNLOADED.
+7. `GET /api/v1/batches/{batchId}/soa-export` endpoint added — batch PDF/Excel export.
+8. API Versioning Policy section added — v1 stability guarantees and breaking change policy.
+9. Idempotency-Key requirement clarified for all mutation endpoints.
+10. Audit log entityType filter extended to include ledger entity types.
+
+### 6.3 Enforcement
+
+All v1 stability guarantees defined in Section H of `04_API_CONTRACT.md` are binding:
+
+- No response fields may be renamed or removed in v1.
+- No permissions may be broadened in v1.
+- No URL patterns may change in v1.
+- Breaking changes require `/api/v2/` and a new architecture version bump.
+
+### 6.4 docs_check.py Update
+
+`FORBIDDEN_TERMS` in `docs_check.py` was updated to remove `"ledger"` as ledger endpoints are now in scope and documented in the frozen contract.
+
+---
+
+*API Contract v2.0 freeze issued under Architecture Governor authority.*
