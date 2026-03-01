@@ -1,9 +1,9 @@
 # API Contract Specification
 
-**Project:** Internal Payment Workflow System (MVP v1)  
-**Document Version:** 1.0  
-**Scope:** Single company, internal web-only, MVP  
-**Last Updated:** 2025-02-11
+**Project:** Internal Payment Workflow System (MVP v1)
+**Document Version:** 2.0
+**Scope:** Single company, internal web-only, MVP
+**Last Updated:** 2026-03-01
 
 ---
 
@@ -13,7 +13,7 @@
 |-------|-------|
 | Document Title | API Contract Specification |
 | Project | Internal Payment Workflow System |
-| Version | 1.0 |
+| Version | 2.0 |
 | Scope | MVP v1 |
 | Base Path | /api/v1 |
 
@@ -22,28 +22,33 @@
 ## General API Principles
 
 1. All endpoints use JSON for request and response bodies. Content-Type is application/json.
-
-2. All dates and timestamps use ISO 8601 format (e.g. 2025-02-11T14:30:00Z).
-
-3. All identifiers are opaque strings. The implementation defines the format.
-
+2. All dates and timestamps use ISO 8601 format (e.g. 2026-03-01T14:30:00Z).
+3. All identifiers are opaque strings. The implementation defines the format (UUID).
 4. All mutations are task-based. No generic create, update, or delete endpoints. Mutations correspond to domain actions (submit, approve, reject, mark-paid).
-
 5. No endpoint may trigger an illegal state transition. Preconditions are enforced before any state change.
-
 6. Pagination uses limit and offset query parameters. Default limit is 50. Maximum limit is 100.
+7. All mutation endpoints require an `Idempotency-Key` header. The server enforces uniqueness per key and operation.
 
 ---
 
 ## Authentication Requirements
 
-1. All endpoints except Authentication group require a valid session or bearer token.
+1. All endpoints except the Authentication group require a valid JWT bearer token.
+2. The server returns 401 Unauthorized when no valid token is presented.
+3. The server returns 403 Forbidden when the token is valid but the user lacks the required role.
+4. The authenticated user identity and role are derived from the JWT token. Role is never read from the request body or query parameters.
+5. Token lifetime is implementation-defined. Refresh tokens may be blacklisted on logout.
 
-2. The authentication mechanism is implementation-defined. The contract assumes the following: the server returns 401 Unauthorized when no valid credentials are presented; the server returns 403 Forbidden when credentials are valid but the user lacks the required role.
+---
 
-3. The authenticated user identity and role are available to the server for authorization checks.
+## Roles
 
-4. Session or token lifetime is implementation-defined.
+| Role | Description |
+|------|-------------|
+| CREATOR | Creates and manages payment batches and requests. |
+| APPROVER | Reviews and approves or rejects payment requests. |
+| VIEWER | Read-only access to all resources. |
+| ADMIN | Full access. Can create users, manage reference data, and mark requests as paid. Supersedes all other roles. |
 
 ---
 
@@ -56,8 +61,6 @@
   "data": { ... }
 }
 ```
-
-The `data` field contains the resource object.
 
 ### Success Response (List)
 
@@ -72,8 +75,6 @@ The `data` field contains the resource object.
 }
 ```
 
-The `data` field is an array of resource objects. The `meta` field contains pagination metadata.
-
 ### Success Response (Mutation)
 
 ```json
@@ -81,8 +82,6 @@ The `data` field is an array of resource objects. The `meta` field contains pagi
   "data": { ... }
 }
 ```
-
-The `data` field contains the updated resource or the created resource.
 
 ---
 
@@ -98,8 +97,6 @@ The `data` field contains the updated resource or the created resource.
 }
 ```
 
-The `details` field is optional and may contain additional context (e.g. field names, constraint violated).
-
 ### Standard Error Codes
 
 | Code | HTTP Status | Description |
@@ -110,8 +107,18 @@ The `details` field is optional and may contain additional context (e.g. field n
 | VALIDATION_ERROR | 400 | Request body or parameters fail validation. |
 | INVALID_STATE | 409 | Entity is not in the required state for the operation. |
 | PRECONDITION_FAILED | 412 | One or more preconditions are not satisfied. |
-| CONFLICT | 409 | Concurrent modification or duplicate operation. |
+| CONFLICT | 409 | Concurrent modification, duplicate operation, or duplicate name. |
 | INTERNAL_ERROR | 500 | Unrecoverable server error. |
+
+---
+
+## Idempotency
+
+All mutation endpoints (POST, PATCH) require an `Idempotency-Key` header. The server stores the key and associates it with the operation result. If the same key is submitted again for the same operation, the server returns the original result without re-executing the operation. If the same key is submitted with a different request body, the server returns 409 CONFLICT.
+
+Idempotency keys are scoped per operation. The same key value may be used for different operations (e.g. one key for create, a different key for approve).
+
+Read-only endpoints (GET) do not require an Idempotency-Key.
 
 ---
 
@@ -121,10 +128,10 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 #### Authenticate
 
-**HTTP Method:** POST  
-**URL Pattern:** /api/v1/auth/login  
-**Required Role:** None (unauthenticated)  
-**Required Current State:** N/A  
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/auth/login
+**Required Role:** None (unauthenticated)
+**Required Current State:** N/A
 
 **Request Body Schema:**
 
@@ -158,17 +165,17 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 | Field | Description |
 |-------|-------------|
-| token | Session or bearer token for subsequent requests. |
+| token | JWT bearer token for subsequent requests. |
 | user.id | User identifier. |
 | user.username | User login identifier. |
 | user.displayName | Human-readable name. |
-| user.role | One of CREATOR, APPROVER, VIEWER. |
+| user.role | One of CREATOR, APPROVER, VIEWER, ADMIN. |
 
 **Possible Error Codes:** UNAUTHORIZED (invalid credentials), VALIDATION_ERROR (missing username or password).
 
-**Side Effects:** Session created or token issued. Implementation-defined.
+**Side Effects:** JWT token issued.
 
-**Idempotency Rules:** N/A (read-like for authentication; repeated calls with same credentials produce new tokens or extend session).
+**Idempotency Rules:** N/A. Repeated calls with same credentials produce new tokens.
 
 **Concurrency Handling Requirements:** None.
 
@@ -176,12 +183,22 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 #### Logout
 
-**HTTP Method:** POST  
-**URL Pattern:** /api/v1/auth/logout  
-**Required Role:** Any authenticated user  
-**Required Current State:** N/A  
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/auth/logout
+**Required Role:** Any authenticated user
+**Required Current State:** N/A
 
-**Request Body Schema:** Empty body or `{}`.
+**Request Body Schema:**
+
+```json
+{
+  "refresh_token": "string"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| refresh_token | string | no | Refresh token to blacklist. |
 
 **Success Response Schema:**
 
@@ -195,9 +212,9 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 **Possible Error Codes:** UNAUTHORIZED.
 
-**Side Effects:** Session invalidated or token revoked.
+**Side Effects:** Refresh token blacklisted if provided.
 
-**Idempotency Rules:** Multiple logout calls return success. No side effects after first logout.
+**Idempotency Rules:** Multiple logout calls return success. No error if token already blacklisted.
 
 **Concurrency Handling Requirements:** None.
 
@@ -207,10 +224,10 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 #### Get Current User
 
-**HTTP Method:** GET  
-**URL Pattern:** /api/v1/users/me  
-**Required Role:** Any authenticated user  
-**Required Current State:** N/A  
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/users/me
+**Required Role:** Any authenticated user
+**Required Current State:** N/A
 
 **Request Body Schema:** None.
 
@@ -239,10 +256,10 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 #### List Users
 
-**HTTP Method:** GET  
-**URL Pattern:** /api/v1/users  
-**Required Role:** CREATOR, APPROVER, or VIEWER  
-**Required Current State:** N/A  
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/users
+**Required Role:** Any authenticated user
+**Required Current State:** N/A
 
 **Query Parameters:**
 
@@ -283,14 +300,708 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 ---
 
+#### Create User
+
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/users
+**Required Role:** ADMIN
+**Required Current State:** N/A
+
+This is an internal administrative endpoint. It is not a public registration or onboarding endpoint. Only ADMIN users may create accounts.
+
+**Request Body Schema:**
+
+```json
+{
+  "username": "string",
+  "password": "string",
+  "displayName": "string",
+  "role": "CREATOR"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| username | string | yes | Unique login identifier. Non-empty. |
+| password | string | yes | User password. Non-empty. |
+| displayName | string | yes | Human-readable name. Non-empty. |
+| role | string | yes | One of CREATOR, APPROVER, VIEWER, ADMIN. |
+
+**Success Response Schema:**
+
+```json
+{
+  "data": {
+    "id": "string",
+    "username": "string",
+    "displayName": "string",
+    "role": "CREATOR"
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR (missing or invalid fields), CONFLICT (username already exists).
+
+**Side Effects:** User account created.
+
+**Idempotency Rules:** Idempotency-Key header required. Duplicate key returns original created user.
+
+**Concurrency Handling Requirements:** None (unique constraint on username enforced at DB level).
+
+**Preconditions:** Actor has role ADMIN.
+
+---
+
+### Reference Data
+
+Reference data entities (clients, sites, vendors, subcontractors) are shared across all modules. They are managed by ADMIN users and referenced by payment requests.
+
+#### List Clients
+
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/ledger/clients
+**Required Role:** Any authenticated user
+**Required Current State:** N/A
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| limit | integer | no | Max results. Default 50, max 100. |
+| offset | integer | no | Pagination offset. Default 0. |
+
+**Request Body Schema:** None.
+
+**Success Response Schema:**
+
+```json
+{
+  "data": [
+    {
+      "id": "string",
+      "name": "string",
+      "isActive": true
+    }
+  ],
+  "meta": {
+    "total": 0,
+    "limit": 50,
+    "offset": 0
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED.
+
+**Side Effects:** None.
+
+**Idempotency Rules:** N/A (read-only).
+
+**Concurrency Handling Requirements:** None.
+
+---
+
+#### Create Client
+
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/ledger/clients
+**Required Role:** ADMIN
+**Required Current State:** N/A
+
+**Request Body Schema:**
+
+```json
+{
+  "name": "string"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| name | string | yes | Unique client name. Non-empty. |
+
+**Success Response Schema:**
+
+```json
+{
+  "data": {
+    "id": "string",
+    "name": "string",
+    "isActive": true
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, CONFLICT (duplicate name).
+
+**Side Effects:** Client created. AuditLog entry created.
+
+**Idempotency Rules:** Idempotency-Key required.
+
+**Concurrency Handling Requirements:** None.
+
+**Preconditions:** Actor has role ADMIN. Name is non-empty and unique.
+
+---
+
+#### Update Client
+
+**HTTP Method:** PATCH
+**URL Pattern:** /api/v1/ledger/clients/{clientId}
+**Required Role:** ADMIN
+**Required Current State:** N/A
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| clientId | string | Client identifier. |
+
+**Request Body Schema:**
+
+```json
+{
+  "name": "string",
+  "isActive": true
+}
+```
+
+All fields optional. Provided fields are updated. Omitted fields are unchanged.
+
+**Success Response Schema:**
+
+```json
+{
+  "data": {
+    "id": "string",
+    "name": "string",
+    "isActive": true
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_ERROR, CONFLICT (duplicate name).
+
+**Side Effects:** Client updated. AuditLog entry created.
+
+**Idempotency Rules:** Idempotency-Key required.
+
+**Concurrency Handling Requirements:** None.
+
+**Preconditions:** Actor has role ADMIN. Client exists.
+
+---
+
+#### List Sites
+
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/ledger/sites
+**Required Role:** Any authenticated user
+**Required Current State:** N/A
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| clientId | string | no | Filter by client identifier. |
+| limit | integer | no | Max results. Default 50, max 100. |
+| offset | integer | no | Pagination offset. Default 0. |
+
+**Request Body Schema:** None.
+
+**Success Response Schema:**
+
+```json
+{
+  "data": [
+    {
+      "id": "string",
+      "code": "string",
+      "name": "string",
+      "clientId": "string",
+      "isActive": true
+    }
+  ],
+  "meta": {
+    "total": 0,
+    "limit": 50,
+    "offset": 0
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED.
+
+**Side Effects:** None.
+
+**Idempotency Rules:** N/A (read-only).
+
+**Concurrency Handling Requirements:** None.
+
+---
+
+#### Create Site
+
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/ledger/sites
+**Required Role:** ADMIN
+**Required Current State:** N/A
+
+**Request Body Schema:**
+
+```json
+{
+  "code": "string",
+  "name": "string",
+  "clientId": "string"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| code | string | yes | Unique site code. Non-empty. |
+| name | string | yes | Site name. Non-empty. |
+| clientId | string | yes | Client identifier. |
+
+**Success Response Schema:**
+
+```json
+{
+  "data": {
+    "id": "string",
+    "code": "string",
+    "name": "string",
+    "clientId": "string",
+    "isActive": true
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, NOT_FOUND (client), CONFLICT (duplicate code).
+
+**Side Effects:** Site created. AuditLog entry created.
+
+**Idempotency Rules:** Idempotency-Key required.
+
+**Concurrency Handling Requirements:** None.
+
+**Preconditions:** Actor has role ADMIN. Code and name are non-empty. Client exists.
+
+---
+
+#### Update Site
+
+**HTTP Method:** PATCH
+**URL Pattern:** /api/v1/ledger/sites/{siteId}
+**Required Role:** ADMIN
+**Required Current State:** N/A
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| siteId | string | Site identifier. |
+
+**Request Body Schema:**
+
+```json
+{
+  "code": "string",
+  "name": "string",
+  "isActive": true
+}
+```
+
+All fields optional.
+
+**Success Response Schema:**
+
+```json
+{
+  "data": {
+    "id": "string",
+    "code": "string",
+    "name": "string",
+    "clientId": "string",
+    "isActive": true
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_ERROR, CONFLICT (duplicate code).
+
+**Side Effects:** Site updated. AuditLog entry created.
+
+**Idempotency Rules:** Idempotency-Key required.
+
+**Concurrency Handling Requirements:** None.
+
+**Preconditions:** Actor has role ADMIN. Site exists.
+
+---
+
+#### List Vendors
+
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/ledger/vendors
+**Required Role:** Any authenticated user
+**Required Current State:** N/A
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| vendorTypeId | string | no | Filter by vendor type identifier. |
+| limit | integer | no | Max results. Default 50, max 100. |
+| offset | integer | no | Pagination offset. Default 0. |
+
+**Request Body Schema:** None.
+
+**Success Response Schema:**
+
+```json
+{
+  "data": [
+    {
+      "id": "string",
+      "name": "string",
+      "vendorTypeId": "string",
+      "vendorTypeName": "string",
+      "isActive": true
+    }
+  ],
+  "meta": {
+    "total": 0,
+    "limit": 50,
+    "offset": 0
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED.
+
+**Side Effects:** None.
+
+**Idempotency Rules:** N/A (read-only).
+
+**Concurrency Handling Requirements:** None.
+
+---
+
+#### Create Vendor
+
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/ledger/vendors
+**Required Role:** ADMIN
+**Required Current State:** N/A
+
+**Request Body Schema:**
+
+```json
+{
+  "name": "string",
+  "vendorTypeId": "string"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| name | string | yes | Unique vendor name within type. Non-empty. |
+| vendorTypeId | string | yes | Vendor type identifier. |
+
+**Success Response Schema:**
+
+```json
+{
+  "data": {
+    "id": "string",
+    "name": "string",
+    "vendorTypeId": "string",
+    "vendorTypeName": "string",
+    "isActive": true
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, NOT_FOUND (vendor type), CONFLICT (duplicate name within type).
+
+**Side Effects:** Vendor created. AuditLog entry created.
+
+**Idempotency Rules:** Idempotency-Key required.
+
+**Concurrency Handling Requirements:** None.
+
+**Preconditions:** Actor has role ADMIN. Name is non-empty. Vendor type exists.
+
+---
+
+#### Update Vendor
+
+**HTTP Method:** PATCH
+**URL Pattern:** /api/v1/ledger/vendors/{vendorId}
+**Required Role:** ADMIN
+**Required Current State:** N/A
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| vendorId | string | Vendor identifier. |
+
+**Request Body Schema:**
+
+```json
+{
+  "name": "string",
+  "isActive": true
+}
+```
+
+All fields optional.
+
+**Success Response Schema:**
+
+```json
+{
+  "data": {
+    "id": "string",
+    "name": "string",
+    "vendorTypeId": "string",
+    "vendorTypeName": "string",
+    "isActive": true
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_ERROR, CONFLICT (duplicate name within type).
+
+**Side Effects:** Vendor updated. AuditLog entry created.
+
+**Idempotency Rules:** Idempotency-Key required.
+
+**Concurrency Handling Requirements:** None.
+
+**Preconditions:** Actor has role ADMIN. Vendor exists.
+
+---
+
+#### List Subcontractors
+
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/ledger/subcontractors
+**Required Role:** Any authenticated user
+**Required Current State:** N/A
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| scopeId | string | no | Filter by scope identifier. |
+| limit | integer | no | Max results. Default 50, max 100. |
+| offset | integer | no | Pagination offset. Default 0. |
+
+**Request Body Schema:** None.
+
+**Success Response Schema:**
+
+```json
+{
+  "data": [
+    {
+      "id": "string",
+      "name": "string",
+      "scopeId": "string",
+      "scopeName": "string",
+      "isActive": true
+    }
+  ],
+  "meta": {
+    "total": 0,
+    "limit": 50,
+    "offset": 0
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED.
+
+**Side Effects:** None.
+
+**Idempotency Rules:** N/A (read-only).
+
+**Concurrency Handling Requirements:** None.
+
+---
+
+#### Create Subcontractor
+
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/ledger/subcontractors
+**Required Role:** ADMIN
+**Required Current State:** N/A
+
+**Request Body Schema:**
+
+```json
+{
+  "name": "string",
+  "scopeId": "string"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| name | string | yes | Unique subcontractor name within scope. Non-empty. |
+| scopeId | string | yes | Subcontractor scope identifier. |
+
+**Success Response Schema:**
+
+```json
+{
+  "data": {
+    "id": "string",
+    "name": "string",
+    "scopeId": "string",
+    "scopeName": "string",
+    "isActive": true
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, NOT_FOUND (scope), CONFLICT (duplicate name within scope).
+
+**Side Effects:** Subcontractor created. AuditLog entry created.
+
+**Idempotency Rules:** Idempotency-Key required.
+
+**Concurrency Handling Requirements:** None.
+
+**Preconditions:** Actor has role ADMIN. Name is non-empty. Scope exists.
+
+---
+
+#### Update Subcontractor
+
+**HTTP Method:** PATCH
+**URL Pattern:** /api/v1/ledger/subcontractors/{subcontractorId}
+**Required Role:** ADMIN
+**Required Current State:** N/A
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| subcontractorId | string | Subcontractor identifier. |
+
+**Request Body Schema:**
+
+```json
+{
+  "name": "string",
+  "isActive": true
+}
+```
+
+All fields optional.
+
+**Success Response Schema:**
+
+```json
+{
+  "data": {
+    "id": "string",
+    "name": "string",
+    "scopeId": "string",
+    "scopeName": "string",
+    "isActive": true
+  }
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_ERROR, CONFLICT (duplicate name within scope).
+
+**Side Effects:** Subcontractor updated. AuditLog entry created.
+
+**Idempotency Rules:** Idempotency-Key required.
+
+**Concurrency Handling Requirements:** None.
+
+**Preconditions:** Actor has role ADMIN. Subcontractor exists.
+
+---
+
+#### List Vendor Types
+
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/ledger/vendor-types
+**Required Role:** Any authenticated user
+**Required Current State:** N/A
+
+**Request Body Schema:** None.
+
+**Success Response Schema:**
+
+```json
+{
+  "data": [
+    {
+      "id": "string",
+      "name": "string"
+    }
+  ]
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED.
+
+**Side Effects:** None.
+
+**Idempotency Rules:** N/A (read-only).
+
+**Concurrency Handling Requirements:** None.
+
+---
+
+#### List Subcontractor Scopes
+
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/ledger/scopes
+**Required Role:** Any authenticated user
+**Required Current State:** N/A
+
+**Request Body Schema:** None.
+
+**Success Response Schema:**
+
+```json
+{
+  "data": [
+    {
+      "id": "string",
+      "name": "string"
+    }
+  ]
+}
+```
+
+**Possible Error Codes:** UNAUTHORIZED.
+
+**Side Effects:** None.
+
+**Idempotency Rules:** N/A (read-only).
+
+**Concurrency Handling Requirements:** None.
+
+---
+
 ### PaymentBatch
 
 #### Create Batch
 
-**HTTP Method:** POST  
-**URL Pattern:** /api/v1/batches  
-**Required Role:** CREATOR  
-**Required Current State:** N/A (creates new entity)  
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/batches
+**Required Role:** CREATOR
+**Required Current State:** N/A (creates new entity)
 
 **Request Body Schema:**
 
@@ -312,7 +1023,7 @@ The `details` field is optional and may contain additional context (e.g. field n
     "id": "string",
     "title": "string",
     "status": "DRAFT",
-    "createdAt": "2025-02-11T14:30:00Z",
+    "createdAt": "2026-03-01T14:30:00Z",
     "createdBy": "string",
     "submittedAt": null,
     "completedAt": null,
@@ -325,7 +1036,7 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 **Side Effects:** PaymentBatch created with status DRAFT. AuditLog entry created.
 
-**Idempotency Rules:** Not idempotent. Each call creates a new batch. Client may send Idempotency-Key header; implementation may return 409 CONFLICT if key is reused.
+**Idempotency Rules:** Idempotency-Key required. Duplicate key returns original created batch.
 
 **Concurrency Handling Requirements:** None (new entity).
 
@@ -335,10 +1046,10 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 #### Get Batch
 
-**HTTP Method:** GET  
-**URL Pattern:** /api/v1/batches/{batchId}  
-**Required Role:** CREATOR, APPROVER, or VIEWER  
-**Required Current State:** N/A  
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/batches/{batchId}
+**Required Role:** CREATOR, APPROVER, VIEWER, or ADMIN
+**Required Current State:** N/A
 
 **Path Parameters:**
 
@@ -356,7 +1067,7 @@ The `details` field is optional and may contain additional context (e.g. field n
     "id": "string",
     "title": "string",
     "status": "DRAFT",
-    "createdAt": "2025-02-11T14:30:00Z",
+    "createdAt": "2026-03-01T14:30:00Z",
     "createdBy": "string",
     "submittedAt": null,
     "completedAt": null,
@@ -368,8 +1079,17 @@ The `details` field is optional and may contain additional context (e.g. field n
         "beneficiaryName": "string",
         "beneficiaryAccount": "string",
         "purpose": "string",
+        "entityType": null,
+        "vendorId": null,
+        "subcontractorId": null,
+        "siteId": null,
+        "baseAmount": null,
+        "extraAmount": null,
+        "totalAmount": null,
+        "entityName": null,
+        "siteCode": null,
         "status": "DRAFT",
-        "createdAt": "2025-02-11T14:30:00Z",
+        "createdAt": "2026-03-01T14:30:00Z",
         "createdBy": "string"
       }
     ]
@@ -389,10 +1109,10 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 #### List Batches
 
-**HTTP Method:** GET  
-**URL Pattern:** /api/v1/batches  
-**Required Role:** CREATOR, APPROVER, or VIEWER  
-**Required Current State:** N/A  
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/batches
+**Required Role:** CREATOR, APPROVER, VIEWER, or ADMIN
+**Required Current State:** N/A
 
 **Query Parameters:**
 
@@ -413,7 +1133,7 @@ The `details` field is optional and may contain additional context (e.g. field n
       "id": "string",
       "title": "string",
       "status": "DRAFT",
-      "createdAt": "2025-02-11T14:30:00Z",
+      "createdAt": "2026-03-01T14:30:00Z",
       "createdBy": "string",
       "submittedAt": null,
       "completedAt": null,
@@ -440,10 +1160,10 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 #### Submit Batch
 
-**HTTP Method:** POST  
-**URL Pattern:** /api/v1/batches/{batchId}/submit  
-**Required Role:** CREATOR  
-**Required Current State:** PaymentBatch DRAFT; all PaymentRequests in batch DRAFT  
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/batches/{batchId}/submit
+**Required Role:** CREATOR
+**Required Current State:** PaymentBatch DRAFT; all PaymentRequests in batch DRAFT
 
 **Path Parameters:**
 
@@ -461,38 +1181,38 @@ The `details` field is optional and may contain additional context (e.g. field n
     "id": "string",
     "title": "string",
     "status": "SUBMITTED",
-    "createdAt": "2025-02-11T14:30:00Z",
+    "createdAt": "2026-03-01T14:30:00Z",
     "createdBy": "string",
-    "submittedAt": "2025-02-11T15:00:00Z",
+    "submittedAt": "2026-03-01T15:00:00Z",
     "completedAt": null,
     "requests": [
       {
         "id": "string",
-        "status": "SUBMITTED"
+        "status": "PENDING_APPROVAL"
       }
     ]
   }
 }
 ```
 
-**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (batch not DRAFT or requests not all DRAFT), PRECONDITION_FAILED (empty batch, invalid request data).
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (batch not DRAFT or requests not all DRAFT), PRECONDITION_FAILED (empty batch).
 
-**Side Effects:** PaymentBatch transitions to SUBMITTED. Submitted At set. All PaymentRequests in batch transition DRAFT to SUBMITTED. Batch transitions to PROCESSING. All PaymentRequests transition SUBMITTED to PENDING_APPROVAL. AuditLog entries created for batch and each request.
+**Side Effects:** PaymentBatch transitions to SUBMITTED then PROCESSING. All PaymentRequests transition DRAFT to SUBMITTED then PENDING_APPROVAL. AuditLog entries created for batch and each request.
 
-**Idempotency Rules:** If batch is already SUBMITTED, return success with current batch state. No duplicate transitions. No duplicate AuditLog entries.
+**Idempotency Rules:** If batch is already SUBMITTED or PROCESSING, return success with current batch state. No duplicate transitions. No duplicate AuditLog entries.
 
-**Concurrency Handling Requirements:** Exclusive row-level lock on PaymentBatch. Exclusive row-level locks on all PaymentRequests in batch. Locks held in consistent order (batch first, then requests by identifier). Lock until commit.
+**Concurrency Handling Requirements:** Exclusive row-level lock on PaymentBatch. Exclusive row-level locks on all PaymentRequests in batch. Lock until commit.
 
-**Preconditions:** PaymentBatch exists. PaymentBatch status is DRAFT. Batch has non-empty title. Batch contains at least one PaymentRequest. All PaymentRequests in batch are in DRAFT. All PaymentRequests have valid amount, currency, beneficiary name, beneficiary account, purpose. Actor has role CREATOR. Actor is the batch creator.
+**Preconditions:** PaymentBatch exists. PaymentBatch status is DRAFT. Batch contains at least one PaymentRequest. All PaymentRequests are in DRAFT. Actor has role CREATOR. Actor is the batch creator.
 
 ---
 
 #### Cancel Batch
 
-**HTTP Method:** POST  
-**URL Pattern:** /api/v1/batches/{batchId}/cancel  
-**Required Role:** CREATOR  
-**Required Current State:** PaymentBatch DRAFT  
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/batches/{batchId}/cancel
+**Required Role:** CREATOR
+**Required Current State:** PaymentBatch DRAFT
 
 **Path Parameters:**
 
@@ -510,19 +1230,19 @@ The `details` field is optional and may contain additional context (e.g. field n
     "id": "string",
     "title": "string",
     "status": "CANCELLED",
-    "createdAt": "2025-02-11T14:30:00Z",
+    "createdAt": "2026-03-01T14:30:00Z",
     "createdBy": "string",
     "submittedAt": null,
-    "completedAt": "2025-02-11T15:00:00Z"
+    "completedAt": "2026-03-01T15:00:00Z"
   }
 }
 ```
 
 **Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (batch not DRAFT).
 
-**Side Effects:** PaymentBatch transitions to CANCELLED. Completed At set. AuditLog entry created.
+**Side Effects:** PaymentBatch transitions to CANCELLED. CompletedAt set. AuditLog entry created.
 
-**Idempotency Rules:** If batch is already CANCELLED, return success with current batch state. No duplicate transitions.
+**Idempotency Rules:** If batch is already CANCELLED, return success with current batch state.
 
 **Concurrency Handling Requirements:** Exclusive row-level lock on PaymentBatch. Lock until commit.
 
@@ -532,12 +1252,86 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 ### PaymentRequest
 
+#### PaymentRequest Response Schema
+
+All PaymentRequest detail endpoints return the following schema. Legacy fields and Phase 2 ledger fields coexist. A request uses either the legacy fields (amount, beneficiaryName, and similar) or the ledger-driven fields (entityType, vendorId, and similar), never both simultaneously.
+
+```json
+{
+  "id": "string",
+  "batchId": "string",
+  "status": "DRAFT",
+  "currency": "USD",
+  "createdAt": "2026-03-01T14:30:00Z",
+  "createdBy": "string",
+  "updatedAt": "2026-03-01T14:35:00Z",
+  "updatedBy": "string",
+
+  "amount": "1000.00",
+  "beneficiaryName": "string",
+  "beneficiaryAccount": "string",
+  "purpose": "string",
+
+  "entityType": "VENDOR",
+  "vendorId": "string",
+  "subcontractorId": null,
+  "siteId": "string",
+  "baseAmount": "900.00",
+  "extraAmount": "100.00",
+  "totalAmount": "1000.00",
+  "entityName": "string",
+  "siteCode": "string",
+
+  "approval": null
+}
+```
+
+**Field Reference:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | UUID | PaymentRequest identifier. |
+| batchId | UUID | Parent PaymentBatch identifier. |
+| status | string | One of DRAFT, SUBMITTED, PENDING_APPROVAL, APPROVED, REJECTED, PAID. |
+| currency | string | Three-letter ISO 4217 code. |
+| createdAt | datetime | ISO 8601. |
+| createdBy | UUID | User identifier. |
+| updatedAt | datetime | ISO 8601. Null if never updated. |
+| updatedBy | UUID | User identifier. Null if never updated. |
+| amount | decimal | Legacy field. Null for ledger-driven requests. |
+| beneficiaryName | string | Legacy field. Null for ledger-driven requests. |
+| beneficiaryAccount | string | Legacy field. Null for ledger-driven requests. |
+| purpose | string | Legacy field. Null for ledger-driven requests. |
+| entityType | string | VENDOR or SUBCONTRACTOR. Null for legacy requests. |
+| vendorId | UUID | Null if entityType is not VENDOR. |
+| subcontractorId | UUID | Null if entityType is not SUBCONTRACTOR. |
+| siteId | UUID | Null for legacy requests. |
+| baseAmount | decimal | Base payment amount. Null for legacy requests. |
+| extraAmount | decimal | Additional amount. Null if no extra. |
+| totalAmount | decimal | baseAmount + extraAmount. Null for legacy requests. |
+| entityName | string | Snapshot of vendor or subcontractor name at time of creation. |
+| siteCode | string | Snapshot of site code at time of creation. |
+| approval | object | Null if no ApprovalRecord. See approval schema below. |
+
+**Approval sub-object:**
+
+```json
+{
+  "decision": "APPROVED",
+  "comment": "string",
+  "approverId": "string",
+  "createdAt": "2026-03-01T15:00:00Z"
+}
+```
+
+---
+
 #### Add Payment Request
 
-**HTTP Method:** POST  
-**URL Pattern:** /api/v1/batches/{batchId}/requests  
-**Required Role:** CREATOR  
-**Required Current State:** PaymentBatch DRAFT  
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/batches/{batchId}/requests
+**Required Role:** CREATOR
+**Required Current State:** PaymentBatch DRAFT
 
 **Path Parameters:**
 
@@ -545,7 +1339,7 @@ The `details` field is optional and may contain additional context (e.g. field n
 |-----------|------|-------------|
 | batchId | string | PaymentBatch identifier. |
 
-**Request Body Schema:**
+**Request Body Schema (Legacy):**
 
 ```json
 {
@@ -557,51 +1351,42 @@ The `details` field is optional and may contain additional context (e.g. field n
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| amount | string | yes | Positive decimal. |
-| currency | string | yes | Three-letter ISO 4217 code. |
-| beneficiaryName | string | yes | Non-empty recipient name. |
-| beneficiaryAccount | string | yes | Non-empty account identifier. |
-| purpose | string | yes | Non-empty payment purpose. |
-
-**Success Response Schema:**
+**Request Body Schema (Ledger-driven):**
 
 ```json
 {
-  "data": {
-    "id": "string",
-    "batchId": "string",
-    "amount": "1000.00",
-    "currency": "USD",
-    "beneficiaryName": "string",
-    "beneficiaryAccount": "string",
-    "purpose": "string",
-    "status": "DRAFT",
-    "createdAt": "2025-02-11T14:30:00Z",
-    "createdBy": "string"
-  }
+  "entityType": "VENDOR",
+  "vendorId": "string",
+  "siteId": "string",
+  "baseAmount": "900.00",
+  "extraAmount": "100.00",
+  "extraReason": "string",
+  "currency": "USD"
 }
 ```
 
-**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND (batch), INVALID_STATE (batch not DRAFT), VALIDATION_ERROR (invalid amount, currency, or empty required fields).
+Legacy and ledger-driven fields are mutually exclusive. Do not mix them in a single request.
 
-**Side Effects:** PaymentRequest created with status DRAFT. AuditLog entry created.
+**Success Response Schema:** See PaymentRequest Response Schema above.
 
-**Idempotency Rules:** Not idempotent. Each call creates a new request.
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND (batch or ledger entity), INVALID_STATE (batch not DRAFT), VALIDATION_ERROR.
+
+**Side Effects:** PaymentRequest created with status DRAFT. AuditLog entry created. Snapshots populated from ledger entities for ledger-driven requests.
+
+**Idempotency Rules:** Idempotency-Key required. Duplicate key returns original created request.
 
 **Concurrency Handling Requirements:** Exclusive row-level lock on PaymentBatch. Lock until commit.
 
-**Preconditions:** PaymentBatch exists. PaymentBatch status is DRAFT. Actor has role CREATOR. Actor is the batch creator. Amount is positive. Currency is valid. BeneficiaryName and BeneficiaryAccount are non-empty. Purpose is non-empty.
+**Preconditions:** PaymentBatch exists in DRAFT. Actor has role CREATOR and is the batch creator.
 
 ---
 
 #### Update Payment Request
 
-**HTTP Method:** PATCH  
-**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}  
-**Required Role:** CREATOR  
-**Required Current State:** PaymentRequest DRAFT  
+**HTTP Method:** PATCH
+**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}
+**Required Role:** CREATOR
+**Required Current State:** PaymentRequest DRAFT
 
 **Path Parameters:**
 
@@ -612,6 +1397,8 @@ The `details` field is optional and may contain additional context (e.g. field n
 
 **Request Body Schema:**
 
+All fields optional. Provided fields are updated. Omitted fields are unchanged.
+
 ```json
 {
   "amount": "1000.00",
@@ -622,47 +1409,26 @@ The `details` field is optional and may contain additional context (e.g. field n
 }
 ```
 
-All fields optional. Provided fields are updated. Omitted fields are unchanged.
+**Success Response Schema:** See PaymentRequest Response Schema above.
 
-**Success Response Schema:**
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (request not DRAFT), VALIDATION_ERROR.
 
-```json
-{
-  "data": {
-    "id": "string",
-    "batchId": "string",
-    "amount": "1000.00",
-    "currency": "USD",
-    "beneficiaryName": "string",
-    "beneficiaryAccount": "string",
-    "purpose": "string",
-    "status": "DRAFT",
-    "createdAt": "2025-02-11T14:30:00Z",
-    "createdBy": "string",
-    "updatedAt": "2025-02-11T14:35:00Z",
-    "updatedBy": "string"
-  }
-}
-```
+**Side Effects:** PaymentRequest fields updated. UpdatedAt and UpdatedBy set. AuditLog entry created.
 
-**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (request not DRAFT), VALIDATION_ERROR (invalid amount, currency, or empty required fields).
-
-**Side Effects:** PaymentRequest amount, currency, beneficiaryName, beneficiaryAccount, purpose updated. Updated At and Updated By set. AuditLog entry created.
-
-**Idempotency Rules:** If called twice with identical payload and request is already in DRAFT with same values, return success. No duplicate AuditLog for no-op.
+**Idempotency Rules:** Idempotency-Key required.
 
 **Concurrency Handling Requirements:** Exclusive row-level lock on PaymentRequest. Lock until commit.
 
-**Preconditions:** PaymentRequest exists. PaymentRequest status is DRAFT. PaymentRequest belongs to specified batch. Actor has role CREATOR. Actor is the batch creator. If amount provided, must be positive. If currency provided, must be valid. If beneficiaryName or beneficiaryAccount provided, must be non-empty. If purpose provided, must be non-empty.
+**Preconditions:** PaymentRequest exists in DRAFT. Belongs to specified batch. Actor has role CREATOR and is the batch creator.
 
 ---
 
-#### Get Payment Request
+#### Get Payment Request (nested)
 
-**HTTP Method:** GET  
-**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}  
-**Required Role:** CREATOR, APPROVER, or VIEWER  
-**Required Current State:** N/A  
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}
+**Required Role:** CREATOR, APPROVER, VIEWER, or ADMIN
+**Required Current State:** N/A
 
 **Path Parameters:**
 
@@ -677,40 +1443,22 @@ All fields optional. Provided fields are updated. Omitted fields are unchanged.
 
 ```json
 {
-  "data": {
-    "id": "string",
-    "batchId": "string",
-    "amount": "1000.00",
-    "currency": "USD",
-    "beneficiaryName": "string",
-    "beneficiaryAccount": "string",
-    "purpose": "string",
-    "status": "DRAFT",
-    "createdAt": "2025-02-11T14:30:00Z",
-    "createdBy": "string",
-    "updatedAt": "2025-02-11T14:35:00Z",
-    "updatedBy": "string",
-    "approval": null,
-    "soaVersions": [
-      {
-        "id": "string",
-        "versionNumber": 1,
-        "uploadedAt": "2025-02-11T14:32:00Z",
-        "uploadedBy": "string"
-      }
-    ]
-  }
+  "data": { ... }
 }
 ```
 
-The `approval` field is null when no ApprovalRecord exists. When an ApprovalRecord exists, it contains:
+See PaymentRequest Response Schema. Also includes:
 
 ```json
 {
-  "decision": "APPROVED",
-  "comment": "string",
-  "approverId": "string",
-  "createdAt": "2025-02-11T15:00:00Z"
+  "soaVersions": [
+    {
+      "id": "string",
+      "versionNumber": 1,
+      "uploadedAt": "2026-03-01T14:32:00Z",
+      "uploadedBy": "string"
+    }
+  ]
 }
 ```
 
@@ -724,12 +1472,39 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
 
 ---
 
+#### Get Payment Request (standalone)
+
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/requests/{requestId}
+**Required Role:** CREATOR, APPROVER, VIEWER, or ADMIN
+**Required Current State:** N/A
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| requestId | string | PaymentRequest identifier. |
+
+**Request Body Schema:** None.
+
+**Success Response Schema:** Same as Get Payment Request (nested) above.
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND.
+
+**Side Effects:** None.
+
+**Idempotency Rules:** N/A (read-only).
+
+**Concurrency Handling Requirements:** None.
+
+---
+
 #### List Pending Requests
 
-**HTTP Method:** GET  
-**URL Pattern:** /api/v1/requests  
-**Required Role:** APPROVER  
-**Required Current State:** N/A  
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/requests
+**Required Role:** APPROVER or ADMIN
+**Required Current State:** N/A
 
 **Query Parameters:**
 
@@ -753,9 +1528,11 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
       "amount": "1000.00",
       "currency": "USD",
       "beneficiaryName": "string",
+      "entityName": "string",
+      "entityType": "VENDOR",
       "purpose": "string",
       "status": "PENDING_APPROVAL",
-      "createdAt": "2025-02-11T14:30:00Z"
+      "createdAt": "2026-03-01T14:30:00Z"
     }
   ],
   "meta": {
@@ -780,10 +1557,10 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
 
 #### Approve Request
 
-**HTTP Method:** POST  
-**URL Pattern:** /api/v1/requests/{requestId}/approve  
-**Required Role:** APPROVER  
-**Required Current State:** PaymentRequest PENDING_APPROVAL  
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/requests/{requestId}/approve
+**Required Role:** APPROVER
+**Required Current State:** PaymentRequest PENDING_APPROVAL
 
 **Path Parameters:**
 
@@ -807,47 +1584,30 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
 
 ```json
 {
-  "data": {
-    "id": "string",
-    "batchId": "string",
-    "amount": "1000.00",
-    "currency": "USD",
-    "beneficiaryName": "string",
-    "beneficiaryAccount": "string",
-    "purpose": "string",
-    "status": "APPROVED",
-    "createdAt": "2025-02-11T14:30:00Z",
-    "createdBy": "string",
-    "updatedAt": "2025-02-11T15:00:00Z",
-    "updatedBy": "string",
-    "approval": {
-      "decision": "APPROVED",
-      "comment": "string",
-      "approverId": "string",
-      "createdAt": "2025-02-11T15:00:00Z"
-    }
-  }
+  "data": { ... }
 }
 ```
 
-**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (request not PENDING_APPROVAL).
+See PaymentRequest Response Schema. Status will be APPROVED.
 
-**Side Effects:** ApprovalRecord created with Decision APPROVED. PaymentRequest transitions to APPROVED. Updated At and Updated By set. AuditLog entry created.
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (request not PENDING_APPROVAL), CONFLICT (already approved).
 
-**Idempotency Rules:** If ApprovalRecord already exists for this request (regardless of decision), return success with current request state. No duplicate ApprovalRecord. No duplicate AuditLog.
+**Side Effects:** ApprovalRecord created with decision APPROVED. PaymentRequest transitions to APPROVED. UpdatedAt and UpdatedBy set. AuditLog entry created.
 
-**Concurrency Handling Requirements:** Exclusive row-level lock on PaymentRequest. Lock until commit. If ApprovalRecord already exists for this request, do not create another.
+**Idempotency Rules:** Idempotency-Key required. If ApprovalRecord already exists for this request, return success with current state. No duplicate ApprovalRecord. No duplicate AuditLog.
 
-**Preconditions:** PaymentRequest exists. PaymentRequest status is PENDING_APPROVAL. No ApprovalRecord exists for this request. Actor has role APPROVER.
+**Concurrency Handling Requirements:** Exclusive row-level lock on PaymentRequest. Lock until commit. If ApprovalRecord already exists, do not create another.
+
+**Preconditions:** PaymentRequest exists in PENDING_APPROVAL. No ApprovalRecord exists. Actor has role APPROVER.
 
 ---
 
 #### Reject Request
 
-**HTTP Method:** POST  
-**URL Pattern:** /api/v1/requests/{requestId}/reject  
-**Required Role:** APPROVER  
-**Required Current State:** PaymentRequest PENDING_APPROVAL  
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/requests/{requestId}/reject
+**Required Role:** APPROVER
+**Required Current State:** PaymentRequest PENDING_APPROVAL
 
 **Path Parameters:**
 
@@ -871,47 +1631,30 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
 
 ```json
 {
-  "data": {
-    "id": "string",
-    "batchId": "string",
-    "amount": "1000.00",
-    "currency": "USD",
-    "beneficiaryName": "string",
-    "beneficiaryAccount": "string",
-    "purpose": "string",
-    "status": "REJECTED",
-    "createdAt": "2025-02-11T14:30:00Z",
-    "createdBy": "string",
-    "updatedAt": "2025-02-11T15:00:00Z",
-    "updatedBy": "string",
-    "approval": {
-      "decision": "REJECTED",
-      "comment": "string",
-      "approverId": "string",
-      "createdAt": "2025-02-11T15:00:00Z"
-    }
-  }
+  "data": { ... }
 }
 ```
 
-**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (request not PENDING_APPROVAL).
+See PaymentRequest Response Schema. Status will be REJECTED.
 
-**Side Effects:** ApprovalRecord created with Decision REJECTED. PaymentRequest transitions to REJECTED. Updated At and Updated By set. AuditLog entry created.
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (request not PENDING_APPROVAL), CONFLICT (already rejected).
 
-**Idempotency Rules:** If ApprovalRecord already exists for this request (regardless of decision), return success with current request state. No duplicate ApprovalRecord. No duplicate AuditLog.
+**Side Effects:** ApprovalRecord created with decision REJECTED. PaymentRequest transitions to REJECTED. UpdatedAt and UpdatedBy set. AuditLog entry created.
 
-**Concurrency Handling Requirements:** Exclusive row-level lock on PaymentRequest. Lock until commit. If ApprovalRecord already exists for this request, do not create another.
+**Idempotency Rules:** Idempotency-Key required. If ApprovalRecord already exists, return success with current state. No duplicate ApprovalRecord. No duplicate AuditLog.
 
-**Preconditions:** PaymentRequest exists. PaymentRequest status is PENDING_APPROVAL. No ApprovalRecord exists for this request. Actor has role APPROVER.
+**Concurrency Handling Requirements:** Exclusive row-level lock on PaymentRequest. Lock until commit.
+
+**Preconditions:** PaymentRequest exists in PENDING_APPROVAL. No ApprovalRecord exists. Actor has role APPROVER.
 
 ---
 
 #### Mark Request Paid
 
-**HTTP Method:** POST  
-**URL Pattern:** /api/v1/requests/{requestId}/mark-paid  
-**Required Role:** CREATOR or APPROVER  
-**Required Current State:** PaymentRequest APPROVED  
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/requests/{requestId}/mark-paid
+**Required Role:** ADMIN
+**Required Current State:** PaymentRequest APPROVED
 
 **Path Parameters:**
 
@@ -925,38 +1668,21 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
 
 ```json
 {
-  "data": {
-    "id": "string",
-    "batchId": "string",
-    "amount": "1000.00",
-    "currency": "USD",
-    "beneficiaryName": "string",
-    "beneficiaryAccount": "string",
-    "purpose": "string",
-    "status": "PAID",
-    "createdAt": "2025-02-11T14:30:00Z",
-    "createdBy": "string",
-    "updatedAt": "2025-02-11T15:30:00Z",
-    "updatedBy": "string",
-    "approval": {
-      "decision": "APPROVED",
-      "comment": "string",
-      "approverId": "string",
-      "createdAt": "2025-02-11T15:00:00Z"
-    }
-  }
+  "data": { ... }
 }
 ```
 
+See PaymentRequest Response Schema. Status will be PAID.
+
 **Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (request not APPROVED).
 
-**Side Effects:** PaymentRequest transitions to PAID. Updated At and Updated By set. AuditLog entry created.
+**Side Effects:** PaymentRequest transitions to PAID. UpdatedAt and UpdatedBy set. AuditLog entry created. If all requests in batch are PAID, batch transitions to COMPLETED.
 
-**Idempotency Rules:** If request is already PAID, return success with current request state. No duplicate transition. No duplicate AuditLog.
+**Idempotency Rules:** Idempotency-Key required. If request is already PAID, return success with current state.
 
 **Concurrency Handling Requirements:** Exclusive row-level lock on PaymentRequest. Lock until commit.
 
-**Preconditions:** PaymentRequest exists. PaymentRequest status is APPROVED. Actor has role CREATOR or APPROVER.
+**Preconditions:** PaymentRequest exists in APPROVED. Actor has role ADMIN.
 
 ---
 
@@ -964,10 +1690,10 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
 
 #### Upload SOA
 
-**HTTP Method:** POST  
-**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}/soa  
-**Required Role:** CREATOR  
-**Required Current State:** PaymentRequest DRAFT  
+**HTTP Method:** POST
+**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}/soa
+**Required Role:** CREATOR
+**Required Current State:** PaymentRequest DRAFT
 
 **Path Parameters:**
 
@@ -976,7 +1702,7 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
 | batchId | string | PaymentBatch identifier. |
 | requestId | string | PaymentRequest identifier. |
 
-**Request Body Schema:** multipart/form-data with file field named `file`. Content-Type: multipart/form-data. The file is the document binary.
+**Request Body Schema:** multipart/form-data. Field name: `file`. Document binary.
 
 **Success Response Schema:**
 
@@ -987,30 +1713,31 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
     "requestId": "string",
     "versionNumber": 1,
     "documentReference": "string",
-    "uploadedAt": "2025-02-11T14:32:00Z",
+    "source": "UPLOAD",
+    "uploadedAt": "2026-03-01T14:32:00Z",
     "uploadedBy": "string"
   }
 }
 ```
 
-**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (request not DRAFT), VALIDATION_ERROR (missing file, invalid file type).
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATE (request not DRAFT), VALIDATION_ERROR (missing file).
 
-**Side Effects:** SOAVersion created. Version Number assigned (1 if first, else max+1). Document stored. AuditLog entry created.
+**Side Effects:** SOAVersion created. VersionNumber assigned (1 if first, else max+1). Document stored. AuditLog entry created.
 
-**Idempotency Rules:** Not idempotent. Each upload creates a new SOAVersion with incremented version.
+**Idempotency Rules:** Idempotency-Key required. Each upload creates a new SOAVersion.
 
-**Concurrency Handling Requirements:** Exclusive row-level lock on PaymentRequest. Version Number computed within locked section. Lock until commit.
+**Concurrency Handling Requirements:** Exclusive row-level lock on PaymentRequest. VersionNumber computed within locked section.
 
-**Preconditions:** PaymentRequest exists. PaymentRequest status is DRAFT. PaymentRequest belongs to specified batch. Actor has role CREATOR. Actor is the batch creator. File is provided and non-empty.
+**Preconditions:** PaymentRequest exists in DRAFT. Belongs to specified batch. Actor has role CREATOR and is the batch creator.
 
 ---
 
 #### List SOA Versions
 
-**HTTP Method:** GET  
-**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}/soa  
-**Required Role:** CREATOR, APPROVER, or VIEWER  
-**Required Current State:** N/A  
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}/soa
+**Required Role:** CREATOR, APPROVER, VIEWER, or ADMIN
+**Required Current State:** N/A
 
 **Path Parameters:**
 
@@ -1030,7 +1757,8 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
       "id": "string",
       "requestId": "string",
       "versionNumber": 1,
-      "uploadedAt": "2025-02-11T14:32:00Z",
+      "source": "UPLOAD",
+      "uploadedAt": "2026-03-01T14:32:00Z",
       "uploadedBy": "string"
     }
   ]
@@ -1049,10 +1777,10 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
 
 #### Get SOA Document
 
-**HTTP Method:** GET  
-**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}/soa/{versionId}  
-**Required Role:** CREATOR, APPROVER, or VIEWER  
-**Required Current State:** N/A  
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}/soa/{versionId}
+**Required Role:** CREATOR, APPROVER, VIEWER, or ADMIN
+**Required Current State:** N/A
 
 **Path Parameters:**
 
@@ -1072,16 +1800,79 @@ The `approval` field is null when no ApprovalRecord exists. When an ApprovalReco
     "id": "string",
     "requestId": "string",
     "versionNumber": 1,
-    "uploadedAt": "2025-02-11T14:32:00Z",
+    "source": "UPLOAD",
+    "uploadedAt": "2026-03-01T14:32:00Z",
     "uploadedBy": "string",
     "downloadUrl": "string"
   }
 }
 ```
 
-The downloadUrl is a temporary URL. The client performs a GET request to downloadUrl to retrieve the document binary.
+The `downloadUrl` points to the download endpoint below. The client performs a separate GET to retrieve the binary.
 
 **Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND.
+
+**Side Effects:** None.
+
+**Idempotency Rules:** N/A (read-only).
+
+**Concurrency Handling Requirements:** None.
+
+---
+
+#### Download SOA Document
+
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/batches/{batchId}/requests/{requestId}/soa/{versionId}/download
+**Required Role:** CREATOR, APPROVER, VIEWER, or ADMIN
+**Required Current State:** N/A
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| batchId | string | PaymentBatch identifier. |
+| requestId | string | PaymentRequest identifier. |
+| versionId | string | SOAVersion identifier. |
+
+**Request Body Schema:** None.
+
+**Success Response:** File binary (FileResponse). Content-Disposition: attachment. Not a JSON response.
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND (404 if file not found on storage).
+
+**Side Effects:** AuditLog entry created with event type SOA_DOWNLOADED.
+
+**Idempotency Rules:** N/A (read-only).
+
+**Concurrency Handling Requirements:** None.
+
+---
+
+#### Export Batch SOA
+
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/batches/{batchId}/soa-export
+**Required Role:** CREATOR, APPROVER, VIEWER, or ADMIN
+**Required Current State:** N/A
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| batchId | string | PaymentBatch identifier. |
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| export | string | yes | Output format. One of `pdf` or `excel`. Note: parameter name is `export`, not `format`, to avoid conflict with DRF content negotiation. |
+
+**Request Body Schema:** None.
+
+**Success Response:** File binary. PDF or Excel file depending on `export` parameter. Not a JSON response.
+
+**Possible Error Codes:** UNAUTHORIZED, FORBIDDEN, NOT_FOUND (batch), VALIDATION_ERROR (missing or invalid export parameter).
 
 **Side Effects:** None.
 
@@ -1095,16 +1886,16 @@ The downloadUrl is a temporary URL. The client performs a GET request to downloa
 
 #### Query Audit Log
 
-**HTTP Method:** GET  
-**URL Pattern:** /api/v1/audit  
-**Required Role:** CREATOR, APPROVER, or VIEWER  
-**Required Current State:** N/A  
+**HTTP Method:** GET
+**URL Pattern:** /api/v1/audit
+**Required Role:** CREATOR, APPROVER, VIEWER, or ADMIN
+**Required Current State:** N/A
 
 **Query Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| entityType | string | no | Filter by entity type. One of PaymentBatch, PaymentRequest. |
+| entityType | string | no | Filter by entity type. One of PaymentBatch, PaymentRequest, Client, Site, Vendor, Subcontractor, SOAVersion. |
 | entityId | string | no | Filter by entity identifier. |
 | actorId | string | no | Filter by actor (user) identifier. |
 | fromDate | string | no | ISO 8601 date. Entries on or after this date. |
@@ -1127,7 +1918,7 @@ The downloadUrl is a temporary URL. The client performs a GET request to downloa
       "entityId": "string",
       "previousState": null,
       "newState": "{\"status\":\"SUBMITTED\"}",
-      "occurredAt": "2025-02-11T15:00:00Z"
+      "occurredAt": "2026-03-01T15:00:00Z"
     }
   ],
   "meta": {
@@ -1148,6 +1939,49 @@ The downloadUrl is a temporary URL. The client performs a GET request to downloa
 
 ---
 
+## API Versioning Policy
+
+This document specifies v1 of the API. The base path `/api/v1/` is stable and backward-compatible.
+
+### v1 Stability Guarantees
+
+1. No response fields will be renamed in v1.
+2. No response fields will be removed in v1.
+3. No permissions will be broadened in v1 (a role that cannot access an endpoint today cannot access it in a future v1 release).
+4. No URL patterns will change in v1.
+5. No request field types will change in v1.
+
+### Breaking Change Policy
+
+Any of the following require a new API version (`/api/v2/`):
+
+- Renaming or removing a response field
+- Changing a field type
+- Removing an endpoint
+- Changing required permissions
+- Changing URL structure
+
+New optional response fields may be added to v1 without a version bump.
+
+---
+
 ## API Freeze Declaration
 
-This API contract specification is frozen for MVP v1. No endpoint, HTTP method, URL pattern, request schema, response schema, error code, precondition, or concurrency requirement may be added, removed, or altered without a formal change control process and document revision.
+This API contract specification is frozen for Internal Payments v1. No endpoint, HTTP method, URL pattern, request schema, response schema, error code, precondition, or concurrency requirement may be added, removed, or altered without a formal change control process and document revision.
+
+**Freeze Date:** 2026-03-01
+**Freeze Version:** v2.0
+**Previous Version:** v1.0 (2025-02-11)
+
+### Changes from v1.0 to v2.0
+
+1. Added ADMIN role to all role tables and permission definitions.
+2. Corrected `mark-paid` permission from CREATOR/APPROVER to ADMIN-only.
+3. Added `POST /api/v1/users` endpoint (ADMIN-only user creation).
+4. Added Phase 2 ledger fields to PaymentRequest response schema: entityType, vendorId, subcontractorId, siteId, baseAmount, extraAmount, totalAmount, entityName, siteCode.
+5. Added full Reference Data section documenting all 10 ledger endpoints.
+6. Added `GET .../soa/{versionId}/download` endpoint (file binary download).
+7. Added `GET /api/v1/batches/{batchId}/soa-export` endpoint (batch export).
+8. Added API Versioning Policy section.
+9. Clarified Idempotency-Key requirement for all mutation endpoints.
+10. Updated audit log entityType filter to include ledger entity types.

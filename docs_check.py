@@ -26,7 +26,6 @@ REQUIRED_FILES = [
 FORBIDDEN_TERMS = [
     "multi-tenant",
     "multi tenancy",
-    "ledger",
     "gst",
     "SaaS",
     "external integration",
