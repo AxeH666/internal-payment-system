@@ -22,6 +22,11 @@ services:
       - ./backend/.env
     environment:
       - ALLOWED_HOSTS=localhost,127.0.0.1,backend
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=internal_payments
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
     ports:
       - "8000:8000"
     healthcheck:
