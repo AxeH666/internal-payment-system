@@ -1,7 +1,9 @@
-"""
-Invariant tests - protect architecture during development.
+"""Invariant tests - protect architecture during development.
+
 Run these tests before and after each implementation step.
 """
+
+from decimal import Decimal
 
 from django.db import IntegrityError
 from django.test import TestCase
@@ -16,8 +18,7 @@ class InvariantTests(TestCase):
 
     def test_total_amount_integrity(self):
         """Ledger-driven requests: total_amount = base_amount + extra_amount."""
-        from decimal import Decimal
-        from apps.ledger.models import Client, Site, VendorType, Vendor
+        from apps.ledger.models import Client, Site, Vendor, VendorType
 
         user = User.objects.create_user(
             username="amt_user",
@@ -50,18 +51,130 @@ class InvariantTests(TestCase):
 
     def test_idempotency_prevents_duplicates(self):
         """Verify idempotency keys prevent duplicate operations."""
-        # Test will be implemented as idempotency is added
-        pass
+        from apps.payments import services
+
+        user = User.objects.create_user(
+            username="idem_inv_user",
+            password="testpass123",
+            display_name="Idem Inv User",
+            role="CREATOR",
+        )
+        batch = PaymentBatch.objects.create(
+            title="Idem Inv Batch", status="DRAFT", created_by=user
+        )
+        key = "invariant-idem-key-001"
+
+        req1 = services.add_request(
+            batch.id,
+            user.id,
+            amount=Decimal("100.00"),
+            currency="USD",
+            beneficiary_name="Inv Beneficiary",
+            beneficiary_account="INV001",
+            purpose="Invariant test payment",
+            idempotency_key=key,
+        )
+        req2 = services.add_request(
+            batch.id,
+            user.id,
+            amount=Decimal("100.00"),
+            currency="USD",
+            beneficiary_name="Inv Beneficiary",
+            beneficiary_account="INV001",
+            purpose="Invariant test payment",
+            idempotency_key=key,
+        )
+
+        self.assertEqual(req1.id, req2.id)
+        self.assertEqual(PaymentRequest.objects.filter(batch=batch).count(), 1)
 
     def test_version_lock_prevents_double_approval(self):
         """Verify version locking prevents concurrent approval."""
-        # Test will be implemented as version locking is added
-        pass
+        from core.exceptions import InvalidStateError
+
+        from apps.payments import services
+        from apps.payments.models import ApprovalRecord
+
+        creator = User.objects.create_user(
+            username="vl_inv_creator",
+            password="testpass123",
+            display_name="VL Inv Creator",
+            role="CREATOR",
+        )
+        approver = User.objects.create_user(
+            username="vl_inv_approver",
+            password="testpass123",
+            display_name="VL Inv Approver",
+            role="APPROVER",
+        )
+        batch = PaymentBatch.objects.create(
+            title="VL Inv Batch", status="DRAFT", created_by=creator
+        )
+        req = services.add_request(
+            batch.id,
+            creator.id,
+            amount=Decimal("200.00"),
+            currency="USD",
+            beneficiary_name="VL Beneficiary",
+            beneficiary_account="VL001",
+            purpose="Version lock test",
+            idempotency_key="vl-inv-add-001",
+        )
+        services.submit_batch(batch.id, creator.id)
+        req.refresh_from_db()
+
+        # First approval must succeed
+        services.approve_request(req.id, approver.id, comment="First approval")
+
+        # Second approval must be rejected by the service
+        req.refresh_from_db()
+        try:
+            services.approve_request(
+                req.id, approver.id, comment="Second approval attempt"
+            )
+        except InvalidStateError:
+            pass  # Expected — request already approved, service correctly rejects it
+
+        # Exactly ONE ApprovalRecord must exist regardless
+        self.assertEqual(ApprovalRecord.objects.filter(payment_request=req).count(), 1)
 
     def test_snapshots_required_for_ledger_driven(self):
         """Verify ledger-driven requests must have snapshots."""
-        # Test will be implemented as snapshots are added
-        pass
+        from apps.payments import services
+        from apps.ledger.models import Client, Site, Vendor, VendorType
+
+        creator = User.objects.create_user(
+            username="snap_inv_creator",
+            password="testpass123",
+            display_name="Snap Inv Creator",
+            role="CREATOR",
+        )
+        batch = PaymentBatch.objects.create(
+            title="Snap Inv Batch", status="DRAFT", created_by=creator
+        )
+        client = Client.objects.create(name="Snap Inv Client")
+        site = Site.objects.create(code="SNP", name="Snap Inv Site", client=client)
+        vt = VendorType.objects.create(name="Snap Inv VT")
+        vendor = Vendor.objects.create(name="Snap Inv Vendor", vendor_type=vt)
+
+        req = services.add_request(
+            batch.id,
+            creator.id,
+            entity_type="VENDOR",
+            vendor_id=vendor.id,
+            site_id=site.id,
+            base_amount=Decimal("500.00"),
+            extra_amount=Decimal("50.00"),
+            extra_reason="Snapshot invariant test",
+            currency="USD",
+            idempotency_key="snap-inv-add-001",
+        )
+
+        self.assertIsNotNone(req.vendor_snapshot_name)
+        self.assertIsNotNone(req.site_snapshot_code)
+        self.assertEqual(req.vendor_snapshot_name, "Snap Inv Vendor")
+        self.assertEqual(req.site_snapshot_code, "SNP")
+        self.assertEqual(req.total_amount, req.base_amount + req.extra_amount)
 
 
 class SOAVersionConstraintTests(TestCase):
@@ -74,13 +187,11 @@ class SOAVersionConstraintTests(TestCase):
             display_name="SOA Tester",
             role="CREATOR",
         )
-
         batch = PaymentBatch.objects.create(
             title="Test Batch",
             status="DRAFT",
             created_by=user,
         )
-
         request = PaymentRequest.objects.create(
             batch=batch,
             status="DRAFT",
@@ -88,7 +199,6 @@ class SOAVersionConstraintTests(TestCase):
             created_by=user,
             beneficiary_name="Test Beneficiary",
         )
-
         with self.assertRaises(IntegrityError):
             SOAVersion.objects.create(
                 payment_request=request,
