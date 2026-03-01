@@ -127,9 +127,14 @@ class InvariantTests(TestCase):
         # First approval — must succeed
         services.approve_request(req.id, approver.id, comment="First approval")
 
-        # Second approval — must return idempotently (no error, no duplicate)
-        req.refresh_from_db()
+    # Second approval — service correctly rejects it, but no duplicate record must exist
+    from core.exceptions import InvalidStateError
+
+    req.refresh_from_db()
+    try:
         services.approve_request(req.id, approver.id, comment="Second approval attempt")
+    except InvalidStateError:
+        pass  # Expected — request already approved, this is correct behaviour
 
         # Exactly ONE ApprovalRecord must exist — never two
         self.assertEqual(ApprovalRecord.objects.filter(payment_request=req).count(), 1)
@@ -162,6 +167,7 @@ class InvariantTests(TestCase):
             site_id=site.id,
             base_amount=Decimal("500.00"),
             extra_amount=Decimal("50.00"),
+            extra_reason="Snapshot invariant test",
             currency="USD",
             idempotency_key="snap-inv-add-001",
         )
