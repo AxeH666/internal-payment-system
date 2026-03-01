@@ -44,12 +44,14 @@ def show_tables():
     print_header("DATABASE TABLES")
 
     with connection.cursor() as cursor:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT tablename
             FROM pg_tables
             WHERE schemaname='public'
             ORDER BY tablename;
-        """)
+        """
+        )
 
         tables = cursor.fetchall()
 
@@ -61,13 +63,15 @@ def show_constraints():
     print_header("DATABASE CONSTRAINTS")
 
     with connection.cursor() as cursor:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT conname, pg_get_constraintdef(c.oid)
             FROM pg_constraint c
             JOIN pg_namespace n ON n.oid = c.connamespace
             WHERE n.nspname = 'public'
             ORDER BY conname;
-        """)
+        """
+        )
 
         constraints = cursor.fetchall()
 
@@ -79,9 +83,11 @@ def show_user_roles():
     print_header("USER ROLES IN DB")
 
     with connection.cursor() as cursor:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT DISTINCT role FROM users;
-        """)
+        """
+        )
 
         roles = cursor.fetchall()
 
