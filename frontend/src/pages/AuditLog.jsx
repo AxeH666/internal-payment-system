@@ -1,186 +1,148 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import api from '../utils/api'
-import { handleErrorResponse } from '../utils/errorHandler'
-import { getCurrentUser } from '../utils/auth'
+import api, { unwrapPaginated } from '../utils/api'
+import { extractError } from '../utils/errorHandler'
+import { SectionHeader, ErrorBanner, LoadingSpinner, EmptyState, Pagination } from '../components/ui'
 
-/**
- * R9: Audit Log Screen
- * Route: /audit
- * Allowed roles: CREATOR, APPROVER, VIEWER
- */
-const AuditLog = () => {
-  const navigate = useNavigate()
-  const [auditEntries, setAuditEntries] = useState([])
+const EVENT_COLORS = {
+  BATCH_CREATED:      'text-info',
+  BATCH_SUBMITTED:    'text-info',
+  BATCH_CANCELLED:    'text-danger',
+  BATCH_COMPLETED:    'text-success',
+  REQUEST_CREATED:    'text-info',
+  REQUEST_APPROVED:   'text-success',
+  REQUEST_REJECTED:   'text-danger',
+  REQUEST_PAID:       'text-accent',
+  SOA_UPLOADED:       'text-warning-text',
+  SOA_DOWNLOADED:     'text-text-secondary',
+  USER_CREATED:       'text-success',
+}
+
+export default function AuditLog() {
+  const [logs, setLogs] = useState([])
+  const [meta, setMeta] = useState({ total: 0, limit: 50, offset: 0 })
+  const [filters, setFilters] = useState({ entityType: '', actorId: '', fromDate: '', toDate: '' })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [user, setUser] = useState(null)
-  const [filters, setFilters] = useState({
-    entityType: '',
-    entityId: '',
-    actorId: '',
-    fromDate: '',
-    toDate: '',
-  })
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const currentUser = await getCurrentUser()
-        setUser(currentUser)
-        await loadAuditLog()
-      } catch (err) {
-        const errorData = handleErrorResponse(err, navigate)
-        setError(errorData.message)
-      } finally {
-        setLoading(false)
-      }
-    }
+  useEffect(() => { loadLogs(0) }, [filters])
 
-    fetchData()
-  }, [navigate])
-
-  const loadAuditLog = async () => {
+  const loadLogs = async (offset = 0) => {
+    setLoading(true); setError('')
     try {
-      const params = {}
-      if (filters.entityType) params.entityType = filters.entityType
-      if (filters.entityId) params.entityId = filters.entityId
-      if (filters.actorId) params.actorId = filters.actorId
-      if (filters.fromDate) params.fromDate = filters.fromDate
-      if (filters.toDate) params.toDate = filters.toDate
-
-      const response = await api.get('/audit', { params })
-      setAuditEntries(response.data.data || [])
-      setError('')
+      const params = new URLSearchParams({ limit: 50, offset })
+      if (filters.entityType) params.set('entityType', filters.entityType)
+      if (filters.actorId) params.set('actorId', filters.actorId)
+      if (filters.fromDate) params.set('fromDate', filters.fromDate)
+      if (filters.toDate) params.set('toDate', filters.toDate)
+      const res = await api.get(`/audit?${params}`)
+      const { items, total } = unwrapPaginated(res)
+      setLogs(items)
+      setMeta({ total, limit: 50, offset })
     } catch (err) {
-      const errorData = handleErrorResponse(err, navigate)
-      setError(errorData.message)
+      setError(extractError(err))
+    } finally {
+      setLoading(false)
     }
   }
 
-  useEffect(() => {
-    if (!loading) {
-      loadAuditLog()
-    }
-  }, [filters])
-
-  const handleFilterChange = (field, value) => {
-    setFilters({ ...filters, [field]: value })
-  }
-
-  if (loading) {
-    return <div style={{ padding: '20px' }}>Loading...</div>
-  }
+  const clearFilters = () => setFilters({ entityType: '', actorId: '', fromDate: '', toDate: '' })
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1400px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '20px' }}>Audit Log</h1>
+    <div className="animate-fade-in">
+      <SectionHeader
+        title="Audit Log"
+        subtitle={`${meta.total} event${meta.total !== 1 ? 's' : ''} recorded`}
+        action={
+          <button className="btn-ghost btn-sm" onClick={clearFilters}>Clear Filters</button>
+        }
+      />
 
-      {error && (
-        <div style={{ color: 'red', marginBottom: '15px', padding: '10px', backgroundColor: '#ffe6e6', borderRadius: '4px' }}>
-          {error}
+      <ErrorBanner message={error} onDismiss={() => setError('')} />
+
+      {/* Filters */}
+      <div className="card p-4 mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div>
+          <label className="label">Entity Type</label>
+          <select className="input" value={filters.entityType}
+            onChange={e => setFilters(f => ({ ...f, entityType: e.target.value }))}>
+            <option value="">All</option>
+            <option>PaymentBatch</option>
+            <option>PaymentRequest</option>
+            <option>Client</option>
+            <option>Site</option>
+            <option>Vendor</option>
+            <option>Subcontractor</option>
+            <option>SOAVersion</option>
+          </select>
         </div>
-      )}
-
-      <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '4px', marginBottom: '20px' }}>
-        <h2>Filters</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px' }}>Entity Type</label>
-            <select
-              value={filters.entityType}
-              onChange={(e) => handleFilterChange('entityType', e.target.value)}
-              style={{ width: '100%', padding: '8px' }}
-            >
-              <option value="">All</option>
-              <option value="PaymentBatch">PaymentBatch</option>
-              <option value="PaymentRequest">PaymentRequest</option>
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px' }}>Entity ID</label>
-            <input
-              type="text"
-              value={filters.entityId}
-              onChange={(e) => handleFilterChange('entityId', e.target.value)}
-              style={{ width: '100%', padding: '8px' }}
-            />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px' }}>Actor ID</label>
-            <input
-              type="text"
-              value={filters.actorId}
-              onChange={(e) => handleFilterChange('actorId', e.target.value)}
-              style={{ width: '100%', padding: '8px' }}
-            />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px' }}>From Date</label>
-            <input
-              type="date"
-              value={filters.fromDate}
-              onChange={(e) => handleFilterChange('fromDate', e.target.value)}
-              style={{ width: '100%', padding: '8px' }}
-            />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px' }}>To Date</label>
-            <input
-              type="date"
-              value={filters.toDate}
-              onChange={(e) => handleFilterChange('toDate', e.target.value)}
-              style={{ width: '100%', padding: '8px' }}
-            />
-          </div>
+        <div>
+          <label className="label">From Date</label>
+          <input type="date" className="input" value={filters.fromDate}
+            onChange={e => setFilters(f => ({ ...f, fromDate: e.target.value }))} />
+        </div>
+        <div>
+          <label className="label">To Date</label>
+          <input type="date" className="input" value={filters.toDate}
+            onChange={e => setFilters(f => ({ ...f, toDate: e.target.value }))} />
+        </div>
+        <div>
+          <label className="label">Actor ID</label>
+          <input className="input font-mono text-xs" placeholder="User UUID…" value={filters.actorId}
+            onChange={e => setFilters(f => ({ ...f, actorId: e.target.value }))} />
         </div>
       </div>
 
-      {auditEntries.length === 0 ? (
-        <div style={{ padding: '40px', textAlign: 'center', backgroundColor: 'white', borderRadius: '4px' }}>
-          <p>No audit entries match your filters.</p>
-        </div>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', borderRadius: '4px' }}>
-          <thead>
-            <tr style={{ borderBottom: '2px solid #ddd' }}>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Event Type</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Entity Type</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Entity ID</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Actor ID</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Previous State</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>New State</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Occurred At</th>
-            </tr>
-          </thead>
-          <tbody>
-            {auditEntries.map((entry) => (
-              <tr key={entry.id} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={{ padding: '12px' }}>{entry.eventType}</td>
-                <td style={{ padding: '12px' }}>{entry.entityType}</td>
-                <td style={{ padding: '12px' }}>{entry.entityId}</td>
-                <td style={{ padding: '12px' }}>{entry.actorId}</td>
-                <td style={{ padding: '12px' }}>{entry.previousState || '-'}</td>
-                <td style={{ padding: '12px' }}>{entry.newState || '-'}</td>
-                <td style={{ padding: '12px' }}>{new Date(entry.occurredAt).toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <div style={{ marginTop: '20px' }}>
-        <Link to="/batches" style={{ color: '#007bff', textDecoration: 'none', marginRight: '20px' }}>
-          View Batches
-        </Link>
-        {user?.role === 'APPROVER' && (
-          <Link to="/requests" style={{ color: '#007bff', textDecoration: 'none', marginRight: '20px' }}>
-            View Pending Requests
-          </Link>
+      <div className="card overflow-hidden">
+        {loading ? (
+          <LoadingSpinner center />
+        ) : logs.length === 0 ? (
+          <EmptyState title="No audit events" description="No events match your filters." />
+        ) : (
+          <>
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Event</th>
+                    <th>Entity Type</th>
+                    <th>Entity ID</th>
+                    <th>Actor</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {logs.map(log => (
+                    <tr key={log.id}>
+                      <td>
+                        <span className={`font-mono text-xs font-medium ${EVENT_COLORS[log.eventType] || 'text-text-secondary'}`}>
+                          {log.eventType}
+                        </span>
+                      </td>
+                      <td className="text-text-muted text-xs">{log.entityType}</td>
+                      <td className="font-mono text-xs text-text-muted">{log.entityId?.slice(0, 8)}…</td>
+                      <td className="font-mono text-xs text-text-muted">{log.actorId?.slice(0, 8)}…</td>
+                      <td className="text-text-muted text-xs">{fmtDateTime(log.occurredAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination
+              total={meta.total}
+              limit={meta.limit}
+              offset={meta.offset}
+              onPageChange={loadLogs}
+            />
+          </>
         )}
       </div>
     </div>
   )
 }
 
-export default AuditLog
+function fmtDateTime(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  })
+}

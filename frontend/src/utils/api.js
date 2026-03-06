@@ -1,88 +1,46 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-
 const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
+  headers: { 'Content-Type': 'application/json' },
 })
 
-// Token storage utilities
-export const tokenStorage = {
-  getAccessToken: () => {
-    return localStorage.getItem('accessToken')
-  },
-  setAccessToken: (token) => {
-    localStorage.setItem('accessToken', token)
-  },
-  getRefreshToken: () => {
-    return localStorage.getItem('refreshToken')
-  },
-  setRefreshToken: (token) => {
-    localStorage.setItem('refreshToken', token)
-  },
-  clearTokens: () => {
-    localStorage.removeItem('accessToken')
-    localStorage.removeItem('refreshToken')
-  },
-}
+// Attach JWT to every request
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
 
-// Request interceptor: attach token
-api.interceptors.request.use(
-  (config) => {
-    const token = tokenStorage.getAccessToken()
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
-    return config
-  },
-  (error) => {
-    return Promise.reject(error)
-  }
-)
-
-// Response interceptor: handle 401 and refresh token
+// Handle 401 → redirect to login
+// Handle 409 → reload page (server state changed)
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error.config
-
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true
-
-      const refreshToken = tokenStorage.getRefreshToken()
-      if (refreshToken) {
-        try {
-          // Try refresh endpoint - format may vary by backend implementation
-          const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-            refresh: refreshToken,
-          })
-          const access = response.data.data?.access || response.data.access || response.data.data?.token || response.data.token
-          if (access) {
-            tokenStorage.setAccessToken(access)
-            const newRefresh = response.data.data?.refresh || response.data.refresh
-            if (newRefresh) {
-              tokenStorage.setRefreshToken(newRefresh)
-            }
-            originalRequest.headers.Authorization = `Bearer ${access}`
-            return api(originalRequest)
-          }
-        } catch (refreshError) {
-          // Refresh failed - clear tokens and redirect to login
-          tokenStorage.clearTokens()
-          window.location.href = '/login'
-          return Promise.reject(refreshError)
-        }
-      }
-      // No refresh token available - clear and redirect
-      tokenStorage.clearTokens()
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('user')
       window.location.href = '/login'
     }
-
+    if (error.response?.status === 409) {
+      window.location.reload()
+    }
     return Promise.reject(error)
   }
 )
+
+// Helper to normalize paginated responses:
+// - API-style:   { data: [...], meta: { total } }
+// - DRF-style:   { results: [...], count }
+export const unwrapPaginated = (response) => {
+  const payload = response?.data || {}
+  const items = payload.data ?? payload.results ?? []
+  const total =
+    payload.meta?.total ??
+    payload.count ??
+    (Array.isArray(items) ? items.length : 0)
+
+  return { items, total, raw: payload }
+}
 
 export default api

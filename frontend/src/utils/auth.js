@@ -1,40 +1,28 @@
-import api, { tokenStorage } from './api'
-
-/**
- * Authentication utilities
- * Token handling follows SECURITY_MODEL.md
- */
-
-export const login = async (username, password) => {
-  const response = await api.post('/auth/login', { username, password })
-  const { token, user } = response.data.data
-  // Note: Refresh token may be included in response if backend supports it
-  const refreshToken = response.data.data.refreshToken || response.data.data.refresh
-
-  tokenStorage.setAccessToken(token)
-  if (refreshToken) {
-    tokenStorage.setRefreshToken(refreshToken)
-  }
-
-  return { user, token }
-}
-
-export const logout = async () => {
+export const getToken = () => localStorage.getItem('access_token')
+export const getUser = () => {
   try {
-    await api.post('/auth/logout', {})
-  } catch (error) {
-    // Continue with logout even if API call fails
-    console.error('Logout API call failed:', error)
-  } finally {
-    tokenStorage.clearTokens()
+    return JSON.parse(localStorage.getItem('user') || 'null')
+  } catch {
+    return null
   }
 }
 
-export const getCurrentUser = async () => {
-  const response = await api.get('/users/me')
-  return response.data.data
+export const setAuth = (token, user) => {
+  localStorage.setItem('access_token', token)
+  localStorage.setItem('user', JSON.stringify(user))
 }
 
-export const isAuthenticated = () => {
-  return !!tokenStorage.getAccessToken()
+export const clearAuth = () => {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('user')
+}
+
+export const isAuthenticated = () => !!getToken()
+export const getRole = () => getUser()?.role || null
+
+export const ROLES = {
+  ADMIN: 'ADMIN',
+  CREATOR: 'CREATOR',
+  APPROVER: 'APPROVER',
+  VIEWER: 'VIEWER',
 }

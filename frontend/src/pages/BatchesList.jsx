@@ -1,139 +1,132 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import api from '../utils/api'
-import { handleErrorResponse } from '../utils/errorHandler'
-import { getCurrentUser } from '../utils/auth'
+import { useNavigate } from 'react-router-dom'
+import api, { unwrapPaginated } from '../utils/api'
+import { extractError } from '../utils/errorHandler'
+import { getUser, ROLES } from '../utils/auth'
+import {
+  SectionHeader, StatusBadge, ErrorBanner, LoadingSpinner,
+  EmptyState, Pagination
+} from '../components/ui'
 
-/**
- * R3: Batches List Screen
- * Route: /batches
- * Allowed roles: CREATOR, APPROVER, VIEWER
- */
-const BatchesList = () => {
+const STATUSES = ['', 'DRAFT', 'PROCESSING', 'COMPLETED', 'CANCELLED']
+
+export default function BatchesList() {
   const navigate = useNavigate()
+  const user = getUser()
+  const canCreate = user?.role === ROLES.CREATOR || user?.role === ROLES.ADMIN
+
   const [batches, setBatches] = useState([])
+  const [meta, setMeta] = useState({ total: 0, limit: 20, offset: 0 })
+  const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [user, setUser] = useState(null)
-  const [statusFilter, setStatusFilter] = useState('')
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const currentUser = await getCurrentUser()
-        setUser(currentUser)
-        await loadBatches()
-      } catch (err) {
-        const errorData = handleErrorResponse(err, navigate)
-        setError(errorData.message)
-      } finally {
-        setLoading(false)
-      }
-    }
+  useEffect(() => { loadBatches(0, statusFilter) }, [statusFilter])
 
-    fetchData()
-  }, [navigate])
-
-  const loadBatches = async () => {
+  const loadBatches = async (offset = 0, status = '') => {
+    setLoading(true); setError('')
     try {
-      const params = {}
-      if (statusFilter) {
-        params.status = statusFilter
-      }
-      const response = await api.get('/batches', { params })
-      setBatches(response.data.data || [])
-      setError('')
+      const params = new URLSearchParams({ limit: 20, offset })
+      if (status) params.set('status', status)
+      const res = await api.get(`/batches?${params}`)
+      const { items, total } = unwrapPaginated(res)
+      setBatches(items)
+      setMeta({ total, limit: 20, offset })
     } catch (err) {
-      const errorData = handleErrorResponse(err, navigate)
-      setError(errorData.message)
+      setError(extractError(err))
+    } finally {
+      setLoading(false)
     }
-  }
-
-  useEffect(() => {
-    if (!loading) {
-      loadBatches()
-    }
-  }, [statusFilter])
-
-  if (loading) {
-    return <div style={{ padding: '20px' }}>Loading...</div>
   }
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '20px' }}>Payment Batches</h1>
-
-      {error && (
-        <div style={{ color: 'red', marginBottom: '15px', padding: '10px', backgroundColor: '#ffe6e6', borderRadius: '4px' }}>
-          {error}
-        </div>
-      )}
-
-      <div style={{ marginBottom: '20px' }}>
-        {(user?.role === 'CREATOR' || user?.role === 'ADMIN') && (
-          <Link to="/batches/new" style={{ display: 'inline-block', padding: '10px 20px', backgroundColor: '#007bff', color: 'white', textDecoration: 'none', borderRadius: '4px', marginRight: '10px' }}>
-            Create Batch
-          </Link>
+    <div className="animate-fade-in">
+      <SectionHeader
+        title="Payment Batches"
+        subtitle={`${meta.total} batch${meta.total !== 1 ? 'es' : ''} total`}
+        action={canCreate && (
+          <button className="btn-primary" onClick={() => navigate('/batches/new')}>
+            <span>+</span> New Batch
+          </button>
         )}
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          style={{ padding: '8px', fontSize: '14px' }}
-        >
-          <option value="">All Statuses</option>
-          <option value="DRAFT">Draft</option>
-          <option value="SUBMITTED">Submitted</option>
-          <option value="PROCESSING">Processing</option>
-          <option value="COMPLETED">Completed</option>
-          <option value="CANCELLED">Cancelled</option>
-        </select>
+      />
+
+      <ErrorBanner message={error} onDismiss={() => setError('')} />
+
+      {/* Filter bar */}
+      <div className="flex gap-2 mb-4 flex-wrap">
+        {STATUSES.map(s => (
+          <button
+            key={s || 'all'}
+            onClick={() => setStatusFilter(s)}
+            className={`btn-sm rounded-full px-3 py-1 text-xs font-medium border transition-all ${
+              statusFilter === s
+                ? 'bg-accent text-white border-accent'
+                : 'btn-secondary'
+            }`}
+          >
+            {s || 'All'}
+          </button>
+        ))}
       </div>
 
-      {batches.length === 0 ? (
-        <div style={{ padding: '40px', textAlign: 'center', backgroundColor: 'white', borderRadius: '4px' }}>
-          <p>No batches yet.</p>
-          {(user?.role === 'CREATOR' || user?.role === 'ADMIN') && (
-            <Link to="/batches/new" style={{ display: 'inline-block', marginTop: '15px', padding: '10px 20px', backgroundColor: '#007bff', color: 'white', textDecoration: 'none', borderRadius: '4px' }}>
-              Create Batch
-            </Link>
-          )}
-        </div>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', borderRadius: '4px' }}>
-          <thead>
-            <tr style={{ borderBottom: '2px solid #ddd' }}>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Title</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Status</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Created</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Request Count</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {batches.map((batch) => (
-              <tr key={batch.id} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={{ padding: '12px' }}>{batch.title}</td>
-                <td style={{ padding: '12px' }}>{batch.status}</td>
-                <td style={{ padding: '12px' }}>{new Date(batch.createdAt).toLocaleDateString()}</td>
-                <td style={{ padding: '12px' }}>{batch.requestCount || 0}</td>
-                <td style={{ padding: '12px' }}>
-                  <Link to={`/batches/${batch.id}`} style={{ color: '#007bff', textDecoration: 'none' }}>
-                    View
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <div style={{ marginTop: '20px' }}>
-        <Link to="/audit" style={{ color: '#007bff', textDecoration: 'none' }}>
-          View Audit Log
-        </Link>
+      <div className="card overflow-hidden">
+        {loading ? (
+          <LoadingSpinner center />
+        ) : batches.length === 0 ? (
+          <EmptyState
+            title="No batches found"
+            description={statusFilter ? `No batches with status "${statusFilter}".` : 'Create your first payment batch to get started.'}
+            action={canCreate && <button className="btn-primary" onClick={() => navigate('/batches/new')}>New Batch</button>}
+          />
+        ) : (
+          <>
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Batch</th>
+                    <th>Status</th>
+                    <th>Requests</th>
+                    <th>Created By</th>
+                    <th>Created</th>
+                    <th>Submitted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {batches.map(b => (
+                    <tr
+                      key={b.id}
+                      className="cursor-pointer"
+                      onClick={() => navigate(`/batches/${b.id}`)}
+                    >
+                      <td className="primary">{b.title}</td>
+                      <td><StatusBadge status={b.status} /></td>
+                      <td>
+                        <span className="text-text-primary font-medium">{b.requestCount ?? 0}</span>
+                      </td>
+                      <td className="text-text-muted">{b.createdBy}</td>
+                      <td className="text-text-muted">{fmtDate(b.createdAt)}</td>
+                      <td className="text-text-muted">{b.submittedAt ? fmtDate(b.submittedAt) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination
+              total={meta.total}
+              limit={meta.limit}
+              offset={meta.offset}
+              onPageChange={(o) => loadBatches(o, statusFilter)}
+            />
+          </>
+        )}
       </div>
     </div>
   )
 }
 
-export default BatchesList
+function fmtDate(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}

@@ -1,397 +1,310 @@
-import { useState, useEffect } from 'react'
-import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import api from '../utils/api'
-import { handleErrorResponse } from '../utils/errorHandler'
-import { getCurrentUser } from '../utils/auth'
-import { getRequestActionVisibility } from '../utils/stateVisibility'
+import { extractError } from '../utils/errorHandler'
+import { getUser, ROLES } from '../utils/auth'
+import { canApprove, canReject, canMarkPaid, canUploadSOA } from '../utils/stateVisibility'
+import {
+  StatusBadge, ErrorBanner, SuccessBanner, LoadingSpinner,
+  ConfirmModal, SectionHeader
+} from '../components/ui'
 
-/**
- * R6: Payment Request Detail (from batch context)
- * Route: /batches/:batchId/requests/:requestId
- * Allowed roles: CREATOR, APPROVER, VIEWER
- */
-const RequestDetail = () => {
-  const navigate = useNavigate()
+export default function RequestDetail() {
   const { batchId, requestId } = useParams()
+  const navigate = useNavigate()
+  const user = getUser()
+  const fileRef = useRef()
+
   const [request, setRequest] = useState(null)
-  const [batch, setBatch] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [user, setUser] = useState(null)
-  const [actionLoading, setActionLoading] = useState('')
-  const [showEditForm, setShowEditForm] = useState(false)
-  const [editFormData, setEditFormData] = useState({})
+  const [success, setSuccess] = useState('')
+  const [comment, setComment] = useState('')
+  const [approveModal, setApproveModal] = useState(false)
+  const [rejectModal, setRejectModal] = useState(false)
+  const [paidModal, setPaidModal] = useState(false)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const currentUser = await getCurrentUser()
-        setUser(currentUser)
-        await loadRequest()
-        await loadBatch()
-      } catch (err) {
-        const errorData = handleErrorResponse(err, navigate)
-        setError(errorData.message)
-      } finally {
-        setLoading(false)
-      }
-    }
+  const isApprover = user?.role === ROLES.APPROVER
+  const isAdmin = user?.role === ROLES.ADMIN
 
-    fetchData()
-  }, [batchId, requestId, navigate])
+  useEffect(() => { loadRequest() }, [requestId])
 
   const loadRequest = async () => {
+    setLoading(true); setError('')
     try {
-      const response = await api.get(`/batches/${batchId}/requests/${requestId}`)
-      setRequest(response.data.data)
-      setEditFormData({
-        amount: response.data.data.amount,
-        currency: response.data.data.currency,
-        beneficiaryName: response.data.data.beneficiaryName,
-        beneficiaryAccount: response.data.data.beneficiaryAccount,
-        purpose: response.data.data.purpose,
-      })
-      setError('')
+      const url = batchId
+        ? `/batches/${batchId}/requests/${requestId}`
+        : `/requests/${requestId}`
+      const res = await api.get(url)
+      setRequest(res.data.data)
     } catch (err) {
-      const errorData = handleErrorResponse(err, navigate)
-      if (errorData.shouldReload) {
-        await loadRequest()
-      }
-      setError(errorData.message)
-    }
-  }
-
-  const loadBatch = async () => {
-    try {
-      const response = await api.get(`/batches/${batchId}`)
-      setBatch(response.data.data)
-    } catch (err) {
-      console.error('Failed to load batch:', err)
-    }
-  }
-
-  const handleUpdateRequest = async () => {
-    setActionLoading('update')
-    setError('')
-    try {
-      const response = await api.patch(`/batches/${batchId}/requests/${requestId}`, editFormData)
-      setRequest(response.data.data)
-      setShowEditForm(false)
-    } catch (err) {
-      const errorData = handleErrorResponse(err, navigate)
-      if (errorData.shouldReload) {
-        await loadRequest()
-      }
-      setError(errorData.message)
+      setError(extractError(err))
     } finally {
-      setActionLoading('')
+      setLoading(false)
     }
   }
 
   const handleApprove = async () => {
-    setActionLoading('approve')
-    setError('')
+    setActionLoading(true)
     try {
-      const response = await api.post(`/requests/${requestId}/approve`, { comment: '' })
-      setRequest(response.data.data)
-      await loadBatch()
-    } catch (err) {
-      const errorData = handleErrorResponse(err, navigate)
-      if (errorData.shouldReload) {
-        await loadRequest()
-        await loadBatch()
-      }
-      setError(errorData.message)
-    } finally {
-      setActionLoading('')
-    }
+      await api.post(`/requests/${requestId}/approve`, { comment }, {
+        headers: { 'Idempotency-Key': `approve-${requestId}` }
+      })
+      setSuccess('Request approved.')
+      setApproveModal(false); setComment('')
+      loadRequest()
+    } catch (err) { setError(extractError(err)); setApproveModal(false) }
+    finally { setActionLoading(false) }
   }
 
   const handleReject = async () => {
-    setActionLoading('reject')
-    setError('')
+    setActionLoading(true)
     try {
-      const response = await api.post(`/requests/${requestId}/reject`, { comment: '' })
-      setRequest(response.data.data)
-      await loadBatch()
-    } catch (err) {
-      const errorData = handleErrorResponse(err, navigate)
-      if (errorData.shouldReload) {
-        await loadRequest()
-        await loadBatch()
-      }
-      setError(errorData.message)
-    } finally {
-      setActionLoading('')
-    }
+      await api.post(`/requests/${requestId}/reject`, { comment }, {
+        headers: { 'Idempotency-Key': `reject-${requestId}` }
+      })
+      setSuccess('Request rejected.')
+      setRejectModal(false); setComment('')
+      loadRequest()
+    } catch (err) { setError(extractError(err)); setRejectModal(false) }
+    finally { setActionLoading(false) }
   }
 
   const handleMarkPaid = async () => {
-    setActionLoading('markPaid')
-    setError('')
+    setActionLoading(true)
     try {
-      const response = await api.post(`/requests/${requestId}/mark-paid`, {})
-      setRequest(response.data.data)
-      await loadBatch()
-    } catch (err) {
-      const errorData = handleErrorResponse(err, navigate)
-      if (errorData.shouldReload) {
-        await loadRequest()
-        await loadBatch()
-      }
-      setError(errorData.message)
-    } finally {
-      setActionLoading('')
-    }
+      await api.post(`/requests/${requestId}/mark-paid`, {}, {
+        headers: { 'Idempotency-Key': `mark-paid-${requestId}` }
+      })
+      setSuccess('Request marked as paid.')
+      setPaidModal(false)
+      loadRequest()
+    } catch (err) { setError(extractError(err)); setPaidModal(false) }
+    finally { setActionLoading(false) }
   }
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0]
+  const handleUploadSOA = async (e) => {
+    const file = e.target.files?.[0]
     if (!file) return
-
-    setActionLoading('upload')
-    setError('')
+    const formData = new FormData()
+    formData.append('file', file)
+    setUploading(true)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      await api.post(`/batches/${batchId}/requests/${requestId}/soa`, formData, {
+      await api.post(`/batches/${batchId || request?.batchId}/requests/${requestId}/soa`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
+          'Idempotency-Key': `upload-soa-${requestId}-${Date.now()}`,
         },
       })
-      await loadRequest()
+      setSuccess('SOA document uploaded.')
+      loadRequest()
     } catch (err) {
-      const errorData = handleErrorResponse(err, navigate)
-      if (errorData.shouldReload) {
-        await loadRequest()
-      }
-      setError(errorData.message)
+      setError(extractError(err))
     } finally {
-      setActionLoading('')
+      setUploading(false)
+      if (fileRef.current) fileRef.current.value = ''
     }
   }
 
-  if (loading) {
-    return <div style={{ padding: '20px' }}>Loading...</div>
-  }
+  if (loading) return <LoadingSpinner center />
+  if (!request && error) return (
+    <div className="animate-fade-in">
+      <ErrorBanner message={error} />
+      <button className="btn-secondary mt-4" onClick={() => navigate(-1)}>← Go Back</button>
+    </div>
+  )
 
-  if (!request) {
-    return (
-      <div style={{ padding: '20px' }}>
-        <p>Request not found.</p>
-        <Link to={`/batches/${batchId}`}>Back to Batch</Link>
-      </div>
-    )
-  }
-
-  const visibility = getRequestActionVisibility(request, batch, user)
-  const soaVersions = request.soaVersions || []
+  const effectiveBatchId = batchId || request?.batchId
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1000px', margin: '0 auto' }}>
-      <div style={{ marginBottom: '20px' }}>
-        <Link to={`/batches/${batchId}`} style={{ color: '#007bff', textDecoration: 'none' }}>
-          ← Back to Batch
-        </Link>
+    <div className="animate-fade-in max-w-3xl">
+      <SectionHeader
+        title="Payment Request"
+        subtitle={<StatusBadge status={request?.status} />}
+        action={
+          <div className="flex items-center gap-2">
+            <button className="btn-ghost" onClick={() => navigate(-1)}>← Back</button>
+            {canMarkPaid(request) && isAdmin && (
+              <button className="btn-primary" onClick={() => setPaidModal(true)}>
+                ✓ Mark as Paid
+              </button>
+            )}
+            {canApprove(request) && (isApprover || isAdmin) && (
+              <button className="btn-primary" onClick={() => setApproveModal(true)}>
+                ✓ Approve
+              </button>
+            )}
+            {canReject(request) && (isApprover || isAdmin) && (
+              <button className="btn-danger" onClick={() => setRejectModal(true)}>
+                ✗ Reject
+              </button>
+            )}
+          </div>
+        }
+      />
+
+      <ErrorBanner message={error} onDismiss={() => setError('')} />
+      <SuccessBanner message={success} onDismiss={() => setSuccess('')} />
+
+      {/* Main details */}
+      <div className="card p-5 mb-4">
+        <div className="grid grid-cols-2 gap-4">
+          <InfoField label="Status" value={<StatusBadge status={request?.status} />} />
+          <InfoField label="Currency" value={request?.currency || '—'} />
+
+          {request?.entityType ? (
+            <>
+              <InfoField label="Entity Type" value={request.entityType} />
+              <InfoField label="Entity" value={request.entityName || '—'} />
+              <InfoField label="Site" value={request.siteCode || '—'} />
+              <InfoField label="Base Amount" value={request.baseAmount ? `${request.baseAmount}` : '—'} />
+              <InfoField label="Extra Amount" value={request.extraAmount ? `${request.extraAmount}` : '—'} />
+              <InfoField label="Total Amount" value={
+                <span className="text-text-primary font-semibold">{request.totalAmount || '—'}</span>
+              } />
+            </>
+          ) : (
+            <>
+              <InfoField label="Beneficiary" value={request?.beneficiaryName || '—'} />
+              <InfoField label="Account" value={<span className="font-mono text-xs">{request?.beneficiaryAccount || '—'}</span>} />
+              <InfoField label="Amount" value={
+                <span className="text-text-primary font-semibold">{request?.amount || '—'}</span>
+              } />
+              <InfoField label="Purpose" value={request?.purpose || '—'} />
+            </>
+          )}
+
+          <InfoField label="Created" value={fmtDate(request?.createdAt)} />
+          <InfoField label="Updated" value={request?.updatedAt ? fmtDate(request.updatedAt) : '—'} />
+        </div>
       </div>
 
-      <h1>Payment Request</h1>
-
-      {error && (
-        <div style={{ color: 'red', marginBottom: '15px', padding: '10px', backgroundColor: '#ffe6e6', borderRadius: '4px' }}>
-          {error}
-        </div>
-      )}
-
-      {showEditForm ? (
-        <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '4px', marginBottom: '20px' }}>
-          <h2>Edit Request</h2>
-          <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px' }}>Amount</label>
-            <input
-              type="text"
-              value={editFormData.amount}
-              onChange={(e) => setEditFormData({ ...editFormData, amount: e.target.value })}
-              style={{ width: '100%', padding: '8px' }}
-            />
-          </div>
-          <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px' }}>Currency</label>
-            <input
-              type="text"
-              value={editFormData.currency}
-              onChange={(e) => setEditFormData({ ...editFormData, currency: e.target.value })}
-              style={{ width: '100%', padding: '8px' }}
-            />
-          </div>
-          <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px' }}>Beneficiary Name</label>
-            <input
-              type="text"
-              value={editFormData.beneficiaryName}
-              onChange={(e) => setEditFormData({ ...editFormData, beneficiaryName: e.target.value })}
-              style={{ width: '100%', padding: '8px' }}
-            />
-          </div>
-          <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px' }}>Beneficiary Account</label>
-            <input
-              type="text"
-              value={editFormData.beneficiaryAccount}
-              onChange={(e) => setEditFormData({ ...editFormData, beneficiaryAccount: e.target.value })}
-              style={{ width: '100%', padding: '8px' }}
-            />
-          </div>
-          <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px' }}>Purpose</label>
-            <textarea
-              value={editFormData.purpose}
-              onChange={(e) => setEditFormData({ ...editFormData, purpose: e.target.value })}
-              style={{ width: '100%', padding: '8px', minHeight: '80px' }}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button
-              onClick={handleUpdateRequest}
-              disabled={actionLoading !== ''}
-              style={{ padding: '10px 20px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-            >
-              Save
-            </button>
-            <button
-              onClick={() => setShowEditForm(false)}
-              disabled={actionLoading !== ''}
-              style={{ padding: '10px 20px', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '4px', marginBottom: '20px' }}>
-          <div style={{ marginBottom: '15px' }}>
-            <p><strong>Amount:</strong> {request.amount} {request.currency}</p>
-            <p><strong>Beneficiary:</strong> {request.beneficiaryName}</p>
-            <p><strong>Account:</strong> {request.beneficiaryAccount}</p>
-            <p><strong>Purpose:</strong> {request.purpose}</p>
-            <p><strong>Status:</strong> {request.status}</p>
-            <p><strong>Created:</strong> {new Date(request.createdAt).toLocaleString()}</p>
-            {request.updatedAt && <p><strong>Updated:</strong> {new Date(request.updatedAt).toLocaleString()}</p>}
-            {request.approval && (
-              <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
-                <p><strong>Approval Decision:</strong> {request.approval.decision}</p>
-                {request.approval.comment && <p><strong>Comment:</strong> {request.approval.comment}</p>}
-                <p><strong>Approved At:</strong> {new Date(request.approval.createdAt).toLocaleString()}</p>
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            {visibility.editButton && (
-              <button
-                onClick={() => setShowEditForm(true)}
-                disabled={actionLoading !== ''}
-                style={{ padding: '10px 20px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-              >
-                Edit
-              </button>
-            )}
-            {visibility.uploadSoaButton && (
-              <label style={{ padding: '10px 20px', backgroundColor: '#17a2b8', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'inline-block' }}>
-                Upload SOA
-                <input type="file" onChange={handleFileUpload} style={{ display: 'none' }} disabled={actionLoading !== ''} />
-              </label>
-            )}
-            {visibility.approveButton && (
-              <button
-                onClick={handleApprove}
-                disabled={actionLoading !== ''}
-                style={{ padding: '10px 20px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: actionLoading !== '' ? 'not-allowed' : 'pointer' }}
-              >
-                {actionLoading === 'approve' ? 'Approving...' : 'Approve'}
-              </button>
-            )}
-            {visibility.rejectButton && (
-              <button
-                onClick={handleReject}
-                disabled={actionLoading !== ''}
-                style={{ padding: '10px 20px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: actionLoading !== '' ? 'not-allowed' : 'pointer' }}
-              >
-                {actionLoading === 'reject' ? 'Rejecting...' : 'Reject'}
-              </button>
-            )}
-            {visibility.markPaidButton && (
-              <button
-                onClick={handleMarkPaid}
-                disabled={actionLoading !== ''}
-                style={{ padding: '10px 20px', backgroundColor: '#ffc107', color: 'black', border: 'none', borderRadius: '4px', cursor: actionLoading !== '' ? 'not-allowed' : 'pointer' }}
-              >
-                {actionLoading === 'markPaid' ? 'Marking...' : 'Mark Paid'}
-              </button>
+      {/* Approval record */}
+      {request?.approval && (
+        <div className={`card p-5 mb-4 border-l-4 ${request.approval.decision === 'APPROVED' ? 'border-l-success' : 'border-l-danger'}`}>
+          <div className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-3">Approval Record</div>
+          <div className="grid grid-cols-2 gap-4">
+            <InfoField label="Decision" value={<StatusBadge status={request.approval.decision} />} />
+            <InfoField label="Approver" value={request.approval.approverId} />
+            <InfoField label="Date" value={fmtDate(request.approval.createdAt)} />
+            {request.approval.comment && (
+              <InfoField label="Comment" value={request.approval.comment} />
             )}
           </div>
         </div>
       )}
 
-      <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '4px' }}>
-        <h2>Statement of Account Documents</h2>
-        <p style={{ color: '#6c757d', marginBottom: '15px' }}>
-          Version history — each version is immutable. Final SOA locks at submission.
-        </p>
-        {soaVersions.length === 0 ? (
-          <p>No Statement of Account documents.</p>
+      {/* SOA section */}
+      <div className="card overflow-hidden mb-4">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-surface-border">
+          <span className="text-text-primary font-medium text-sm">SOA Documents</span>
+          {canUploadSOA(request) && (
+            <label className={`btn-secondary btn-sm cursor-pointer ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+              {uploading ? <><LoadingSpinner size="sm" /> Uploading…</> : '↑ Upload SOA'}
+              <input ref={fileRef} type="file" className="hidden" onChange={handleUploadSOA} />
+            </label>
+          )}
+        </div>
+        {!request?.soaVersions?.length ? (
+          <div className="text-center py-8 text-text-muted text-sm">No SOA documents uploaded.</div>
         ) : (
-          <div>
-            {soaVersions.map((soa) => (
-              <div
-                key={soa.id}
-                style={{
-                  marginBottom: '16px',
-                  padding: '12px',
-                  backgroundColor: '#f8f9fa',
-                  borderRadius: '4px',
-                  borderLeft: '4px solid #007bff',
-                }}
-              >
-                <div style={{ fontWeight: 'bold', marginBottom: '6px' }}>
-                  Version {soa.versionNumber}
-                  {soa.source === 'GENERATED' && (
-                    <span style={{ marginLeft: '8px', fontSize: '12px', color: '#6c757d', backgroundColor: '#e9ecef', padding: '2px 6px', borderRadius: '4px' }}>
-                      Auto-generated
-                    </span>
-                  )}
-                  {' — '}
-                  {soa.changeSummary || `Uploaded ${new Date(soa.uploadedAt).toLocaleString()}`}
-                </div>
-                {soa.downloadUrl && (
-                  <a
-                    href="#"
-                    style={{ color: '#007bff', textDecoration: 'none', fontSize: '14px' }}
-                    onClick={(e) => {
-                      e.preventDefault()
-                      const apiPath = (soa.downloadUrl.split('/api/v1')[1] || soa.downloadUrl).replace(/^\//, '')
-                      api.get(apiPath, { responseType: 'blob' })
-                        .then((res) => {
-                          const url = URL.createObjectURL(new Blob([res.data]))
-                          const link = document.createElement('a')
-                          link.href = url
-                          link.download = `soa_v${soa.versionNumber}.pdf`
-                          link.click()
-                          URL.revokeObjectURL(url)
-                        })
-                        .catch(() => setError('Download failed'))
-                    }}
-                  >
-                    Download v{soa.versionNumber}
-                  </a>
-                )}
-              </div>
-            ))}
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr><th>Version</th><th>Uploaded</th><th>Source</th><th></th></tr>
+              </thead>
+              <tbody>
+                {request.soaVersions.map(v => (
+                  <tr key={v.id}>
+                    <td className="primary font-mono">v{v.versionNumber}</td>
+                    <td>{fmtDate(v.uploadedAt)}</td>
+                    <td>{v.source || 'UPLOAD'}</td>
+                    <td>
+                      <a
+                        href={`/api/v1/batches/${effectiveBatchId}/requests/${requestId}/soa/${v.id}/download`}
+                        className="btn-ghost btn-sm text-accent"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        ↓ Download
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
+
+      {/* Approve modal */}
+      {approveModal && (
+        <div className="modal-overlay" onClick={() => setApproveModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3 className="text-text-primary font-semibold mb-1">Approve Request</h3>
+            <p className="text-text-muted text-sm mb-4">Add an optional comment before approving.</p>
+            <div className="form-group">
+              <label className="label">Comment (optional)</label>
+              <textarea className="input resize-none" rows={3} value={comment}
+                onChange={e => setComment(e.target.value)} placeholder="Approval notes…" />
+            </div>
+            <div className="flex justify-end gap-3 mt-2">
+              <button className="btn-secondary" onClick={() => setApproveModal(false)} disabled={actionLoading}>Cancel</button>
+              <button className="btn-primary" onClick={handleApprove} disabled={actionLoading}>
+                {actionLoading ? <LoadingSpinner size="sm" /> : '✓ Confirm Approve'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject modal */}
+      {rejectModal && (
+        <div className="modal-overlay" onClick={() => setRejectModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3 className="text-text-primary font-semibold mb-1">Reject Request</h3>
+            <p className="text-text-muted text-sm mb-4">Add an optional comment before rejecting.</p>
+            <div className="form-group">
+              <label className="label">Comment (optional)</label>
+              <textarea className="input resize-none" rows={3} value={comment}
+                onChange={e => setComment(e.target.value)} placeholder="Reason for rejection…" />
+            </div>
+            <div className="flex justify-end gap-3 mt-2">
+              <button className="btn-secondary" onClick={() => setRejectModal(false)} disabled={actionLoading}>Cancel</button>
+              <button className="btn-danger" onClick={handleReject} disabled={actionLoading}>
+                {actionLoading ? <LoadingSpinner size="sm" /> : '✗ Confirm Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        open={paidModal}
+        title="Mark as Paid"
+        message="Confirm this payment has been processed and mark the request as Paid."
+        confirmLabel="Mark as Paid"
+        variant="primary"
+        onConfirm={handleMarkPaid}
+        onCancel={() => setPaidModal(false)}
+        loading={actionLoading}
+      />
     </div>
   )
 }
 
-export default RequestDetail
+function InfoField({ label, value }) {
+  return (
+    <div>
+      <div className="label">{label}</div>
+      <div className="text-text-secondary text-sm">{value}</div>
+    </div>
+  )
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}

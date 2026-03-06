@@ -1,185 +1,43 @@
-/**
- * State-Based UI Visibility Rules
- * These functions determine button visibility based on backend state only.
- * No business logic - purely rendering rules based on server state.
- */
+// All visibility decisions are based on server-provided state.
+// No business logic lives here — only mapping state to UI visibility.
 
-/**
- * Batch-level visibility rules
- * Returns which buttons should be visible based on batch status and user role
- */
-export const getBatchActionVisibility = (batch, currentUser) => {
-  const isCreator = currentUser?.role === 'CREATOR'
-  const isAdmin = currentUser?.role === 'ADMIN'
-  const isBatchCreator = batch?.createdBy === currentUser?.id
-  const isDraft = batch?.status === 'DRAFT'
-  const isClosed = batch?.status === 'COMPLETED' || batch?.status === 'CANCELLED'
-  const canActAsCreator = (isCreator && isBatchCreator) || isAdmin
+export const canSubmitBatch = (batch) =>
+  batch?.status === 'DRAFT' && (batch?.requestCount ?? 0) > 0
 
-  // CLOSED batch rule: all mutation actions disabled
-  if (isClosed) {
-    return {
-      submitButton: false,
-      cancelButton: false,
-      addRequestButton: false,
-    }
-  }
+export const canCancelBatch = (batch) => batch?.status === 'DRAFT'
 
-  // DRAFT state: buttons visible to CREATOR (batch creator) or ADMIN
-  if (isDraft && canActAsCreator) {
-    return {
-      submitButton: true,
-      cancelButton: true,
-      addRequestButton: true,
-    }
-  }
+export const canAddRequest = (batch) => batch?.status === 'DRAFT'
 
-  return {
-    submitButton: false,
-    cancelButton: false,
-    addRequestButton: false,
-  }
+export const canEditRequest = (request) => request?.status === 'DRAFT'
+
+export const canApprove = (request) => request?.status === 'PENDING_APPROVAL'
+
+export const canReject = (request) => request?.status === 'PENDING_APPROVAL'
+
+export const canMarkPaid = (request) => request?.status === 'APPROVED'
+
+export const canUploadSOA = (request) => request?.status === 'DRAFT'
+
+export const STATUS_LABELS = {
+  DRAFT: 'Draft',
+  SUBMITTED: 'Submitted',
+  PROCESSING: 'Processing',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+  PENDING_APPROVAL: 'Pending Approval',
+  APPROVED: 'Approved',
+  REJECTED: 'Rejected',
+  PAID: 'Paid',
 }
 
-/**
- * Request-level visibility rules (within batch context)
- * Returns which buttons should be visible based on request status, batch status, and user role
- */
-export const getRequestActionVisibility = (request, batch, currentUser) => {
-  const isCreator = currentUser?.role === 'CREATOR'
-  const isApprover = currentUser?.role === 'APPROVER'
-  const isAdmin = currentUser?.role === 'ADMIN'
-  const isBatchCreator = batch?.createdBy === currentUser?.id
-  const isClosed = batch?.status === 'COMPLETED' || batch?.status === 'CANCELLED'
-  const requestStatus = request?.status
-  const canActAsCreator = (isCreator && isBatchCreator) || isAdmin
-  const canActAsApprover = isApprover || isAdmin
-
-  // CLOSED batch rule: all mutation actions disabled
-  if (isClosed) {
-    return {
-      editButton: false,
-      uploadSoaButton: false,
-      approveButton: false,
-      rejectButton: false,
-      markPaidButton: false,
-    }
-  }
-
-  // PAID state rule: all mutation actions disabled
-  if (requestStatus === 'PAID') {
-    return {
-      editButton: false,
-      uploadSoaButton: false,
-      approveButton: false,
-      rejectButton: false,
-      markPaidButton: false,
-    }
-  }
-
-  // REJECTED state rule: all mutation actions disabled
-  if (requestStatus === 'REJECTED') {
-    return {
-      editButton: false,
-      uploadSoaButton: false,
-      approveButton: false,
-      rejectButton: false,
-      markPaidButton: false,
-    }
-  }
-
-  // DRAFT state
-  if (requestStatus === 'DRAFT' && canActAsCreator) {
-    return {
-      editButton: true,
-      uploadSoaButton: true,
-      approveButton: false,
-      rejectButton: false,
-      markPaidButton: false,
-    }
-  }
-
-  // PENDING_APPROVAL state
-  if (requestStatus === 'PENDING_APPROVAL' && canActAsApprover) {
-    return {
-      editButton: false,
-      uploadSoaButton: false,
-      approveButton: true,
-      rejectButton: true,
-      markPaidButton: false,
-    }
-  }
-
-  // APPROVED state
-  if (requestStatus === 'APPROVED' && (isCreator || isApprover || isAdmin)) {
-    return {
-      editButton: false,
-      uploadSoaButton: false,
-      approveButton: false,
-      rejectButton: false,
-      markPaidButton: true,
-    }
-  }
-
-  // SUBMITTED state: no actions
-  if (requestStatus === 'SUBMITTED') {
-    return {
-      editButton: false,
-      uploadSoaButton: false,
-      approveButton: false,
-      rejectButton: false,
-      markPaidButton: false,
-    }
-  }
-
-  return {
-    editButton: false,
-    uploadSoaButton: false,
-    approveButton: false,
-    rejectButton: false,
-    markPaidButton: false,
-  }
-}
-
-/**
- * Request-level visibility rules (approval queue context R8)
- */
-export const getRequestApprovalQueueVisibility = (request, currentUser) => {
-  const isApprover = currentUser?.role === 'APPROVER'
-  const isAdmin = currentUser?.role === 'ADMIN'
-  const canApprove = isApprover || isAdmin
-  const requestStatus = request?.status
-
-  if (!canApprove) {
-    return {
-      approveButton: false,
-      rejectButton: false,
-      markPaidButton: false,
-    }
-  }
-
-  // PENDING_APPROVAL state
-  if (requestStatus === 'PENDING_APPROVAL') {
-    return {
-      approveButton: true,
-      rejectButton: true,
-      markPaidButton: false,
-    }
-  }
-
-  // APPROVED state
-  if (requestStatus === 'APPROVED') {
-    return {
-      approveButton: false,
-      rejectButton: false,
-      markPaidButton: true,
-    }
-  }
-
-  // REJECTED or PAID: no actions
-  return {
-    approveButton: false,
-    rejectButton: false,
-    markPaidButton: false,
-  }
+export const STATUS_BADGE_CLASS = {
+  DRAFT: 'badge-draft',
+  SUBMITTED: 'badge-submitted',
+  PROCESSING: 'badge-processing',
+  COMPLETED: 'badge-completed',
+  CANCELLED: 'badge-cancelled',
+  PENDING_APPROVAL: 'badge-pending',
+  APPROVED: 'badge-approved',
+  REJECTED: 'badge-rejected',
+  PAID: 'badge-paid',
 }

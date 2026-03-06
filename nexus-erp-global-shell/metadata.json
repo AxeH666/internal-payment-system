@@ -1,0 +1,5 @@
+{
+  "name": "Nexus ERP Global Shell",
+  "description": "A high-fidelity, minimal enterprise ERP UI shell with collapsible navigation, module switching, and consistent data-first design patterns.",
+  "requestFramePermissions": []
+}
