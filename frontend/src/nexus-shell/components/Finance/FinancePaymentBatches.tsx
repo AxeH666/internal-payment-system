@@ -1,2 +1,2 @@
 
-export { FinancePaymentBatches } from '../../../../nexus-erp-global-shell/components/Finance/FinancePaymentBatches';
+export { FinancePaymentBatches } from '@nexus-shell/components/Finance/FinancePaymentBatches';
