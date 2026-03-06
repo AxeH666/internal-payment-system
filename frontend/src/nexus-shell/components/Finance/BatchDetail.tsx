@@ -1,2 +1,2 @@
 
-export { BatchDetail } from '../../../../nexus-erp-global-shell/components/Finance/BatchDetail';
+export { BatchDetail } from '@nexus-shell/components/Finance/BatchDetail';

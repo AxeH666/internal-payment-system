@@ -1,2 +1,2 @@
 
-export { FinanceApprovals } from '../../../../nexus-erp-global-shell/components/Finance/FinanceApprovals';
+export { FinanceApprovals } from '@nexus-shell/components/Finance/FinanceApprovals';

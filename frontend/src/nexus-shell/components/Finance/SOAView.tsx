@@ -1,2 +1,2 @@
 
-export { SOAView } from '../../../../nexus-erp-global-shell/components/Finance/SOAView';
+export { SOAView } from '@nexus-shell/components/Finance/SOAView';
