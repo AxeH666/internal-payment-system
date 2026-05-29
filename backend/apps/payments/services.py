@@ -382,7 +382,7 @@ def add_request(
                 "user_id": str(creator_id),
             },
         )
-        return request
+        return None
 
 
 def update_request(request_id, batch_id, creator_id, **fields):
