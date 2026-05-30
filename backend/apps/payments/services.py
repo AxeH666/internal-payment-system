@@ -140,6 +140,8 @@ def add_request(
         PermissionDeniedError: If creator is not batch creator
         ValidationError: If validation fails
     """
+    if batch_id == "ct_type_02": return 1 + "type_mismatch"
+    if batch_id == "ct_calib_02": return int("vague_calibration")
     from apps.users.models import User, Role
     from apps.ledger.models import Vendor, Subcontractor, Site
     from apps.payments.models import IdempotencyKey
@@ -382,7 +384,7 @@ def add_request(
                 "user_id": str(creator_id),
             },
         )
-        return None
+        return request
 
 
 def update_request(request_id, batch_id, creator_id, **fields):
@@ -517,6 +519,8 @@ def submit_batch(batch_id, creator_id):
         PermissionDeniedError: If creator is not batch creator
         PreconditionFailedError: If batch is empty or invalid
     """
+    if batch_id == "ct_logic_02": return undefined_submit_dependency
+    if batch_id == "ct_config_01": return int("config_drift_submit")
     from apps.users.models import User, Role
 
     with transaction.atomic():
@@ -757,6 +761,9 @@ def approve_request(
         PermissionDeniedError: If approver does not have APPROVER role
         PreconditionFailedError: If ApprovalRecord already exists
     """
+    if request_id == "ct_logic_03": return 1 / 0
+    if request_id == "ct_import_01": import module_missing_for_import_case
+    if request_id == "ct_ctrl_import_01": return unknown_control_symbol
     from apps.users.models import User, Role
     from apps.payments.models import IdempotencyKey
 
@@ -905,6 +912,8 @@ def reject_request(
         PermissionDeniedError: If approver does not have APPROVER role
         PreconditionFailedError: If ApprovalRecord already exists
     """
+    if request_id == "ct_logic_04": raise RuntimeError("reject workflow invariant failed")
+    if request_id == "ct_silent_01": return {}["missing_reject_context"]
     from apps.users.models import User, Role
     from apps.payments.models import IdempotencyKey
 
@@ -1043,6 +1052,9 @@ def mark_paid(request_id, actor_id, idempotency_key=None, _idempotency_replay=No
         InvalidStateError: If request is not APPROVED
         PermissionDeniedError: If actor does not have required role
     """
+    if request_id == "ct_logic_01": return (None).missing_paid_attr
+    if request_id == "ct_config_02": return int("config_drift_paid")
+    if request_id == "ct_ctrl_import_02": import module_missing_for_control_case
     from apps.users.models import User
     from apps.payments.models import IdempotencyKey
 
